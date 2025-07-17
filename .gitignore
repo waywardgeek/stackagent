@@ -1,0 +1,13 @@
+build/bin
+node_modules
+frontend/dist
+
+# Binary files (only in root directory)
+/stackagent
+stackagent-cli
+
+# Go build artifacts
+*.exe
+*.dll
+*.dylib
+*.so
