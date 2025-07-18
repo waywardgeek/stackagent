@@ -14,6 +14,7 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
   const websocket = useRef<WebSocket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [sessionId, setSessionId] = useState<string>('current'); // Store actual session ID
   const isManuallyDisconnected = useRef(false);
 
   const store = useAppStore();
@@ -28,6 +29,16 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
   const handleMessage = useCallback((event: MessageEvent) => {
     try {
       const data = JSON.parse(event.data) as WebSocketEvent;
+      
+      // Log debug message
+      storeRef.current.addDebugMessage({
+        timestamp: new Date(),
+        direction: 'received',
+        type: 'websocket',
+        event: data.type,
+        data: data,
+        rawJson: event.data,
+      });
       
       switch (data.type) {
         case 'ping':
@@ -54,6 +65,8 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
             message: `New session: ${data.data.sessionId}`,
             timestamp: new Date(),
           });
+          // Store the actual session ID
+          setSessionId(data.data.sessionId);
           break;
           
         case 'session_ended':
@@ -184,7 +197,25 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
           break;
           
         case 'user_message':
-          // User message confirmation - already handled in ChatInput
+          // User message confirmation - update with correct session ID if needed
+          const userMessage = storeRef.current.messages.find(m => m.id === data.data.id);
+          if (userMessage && userMessage.sessionId !== data.sessionId) {
+            storeRef.current.updateMessage(data.data.id, {
+              sessionId: data.sessionId,
+            });
+          }
+          break;
+          
+        case 'debug_message':
+          // Log the debug message
+          storeRef.current.addDebugMessage({
+            timestamp: new Date(),
+            direction: 'received',
+            type: 'debug_message',
+            event: data.type,
+            data: data,
+            rawJson: event.data,
+          });
           break;
           
         default:
@@ -227,6 +258,7 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
   const handleClose = useCallback(() => {
     setIsConnected(false);
     setIsConnecting(false);
+    setSessionId('current'); // Reset session ID on disconnect
     console.log('WebSocket disconnected');
   }, []);
 
@@ -278,6 +310,7 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
     
     setIsConnected(false);
     setIsConnecting(false);
+    setSessionId('current'); // Reset session ID on disconnect
   }, [handleOpen, handleMessage, handleClose, handleError]);
 
   // Send message to WebSocket
@@ -288,11 +321,22 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
         type,
         data,
         timestamp: new Date(),
-        sessionId: 'current',
+        sessionId: sessionId, // Use the actual session ID
       };
       
       try {
-        ws.send(JSON.stringify(message));
+        const jsonString = JSON.stringify(message);
+        ws.send(jsonString);
+        
+        // Log debug message
+        storeRef.current.addDebugMessage({
+          timestamp: new Date(),
+          direction: 'sent',
+          type: 'websocket',
+          event: type,
+          data: message,
+          rawJson: jsonString,
+        });
       } catch (error) {
         console.error('Error sending message:', error);
       }

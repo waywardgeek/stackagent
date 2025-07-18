@@ -97,7 +97,7 @@ export const DualPaneLayout: React.FC<DualPaneLayoutProps> = ({ sendMessage }) =
           className="pane bg-white dark:bg-secondary-800"
           style={{ width: `${100 - leftPaneWidth}%` }}
         >
-          <ActionPane />
+          <ActionPane sendMessage={sendMessage} />
         </div>
       </div>
       

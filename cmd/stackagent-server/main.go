@@ -14,9 +14,6 @@ func main() {
 	// Create WebSocket server
 	wsServer := web.NewWebSocketServer()
 	
-	// Start WebSocket server in a goroutine
-	go wsServer.Run()
-	
 	// Create HTTP server
 	mux := http.NewServeMux()
 	

@@ -12,10 +12,14 @@ import type {
   KnowledgeBase,
   AIModel,
   Session,
-  Notification
+  Notification,
+  DebugMessage
 } from '@/types';
 
 interface AppStore extends AppState {
+  // Debug Messages
+  debugMessages: DebugMessage[];
+  
   // UI Actions
   setLeftPaneWidth: (width: number) => void;
   setRightPaneWidth: (width: number) => void;
@@ -64,6 +68,10 @@ interface AppStore extends AppState {
   incrementReconnectAttempts: () => void;
   resetReconnectAttempts: () => void;
   
+  // Debug Actions
+  addDebugMessage: (message: Omit<DebugMessage, 'id'>) => void;
+  clearDebugMessages: () => void;
+  
   // Notification Actions
   notifications: Notification[];
   addNotification: (notification: Omit<Notification, 'id'>) => void;
@@ -107,6 +115,9 @@ export const useAppStore = create<AppStore>()(
       
       // Initial Notifications
       notifications: [],
+      
+      // Debug Messages
+      debugMessages: [],
       
       // UI Actions
       setLeftPaneWidth: (width) => set((state) => {
@@ -278,6 +289,16 @@ export const useAppStore = create<AppStore>()(
         state.reconnectAttempts = 0;
       }),
       
+      // Debug Actions
+      addDebugMessage: (message) => set((state) => {
+        const id = Date.now().toString();
+        state.debugMessages.push({ ...message, id });
+      }),
+      
+      clearDebugMessages: () => set((state) => {
+        state.debugMessages = [];
+      }),
+      
       // Notification Actions
       addNotification: (notification) => set((state) => {
         const id = Date.now().toString();
@@ -310,3 +331,4 @@ export const selectCurrentSession = (state: AppStore) => state.currentSession;
 export const selectIsConnected = (state: AppStore) => state.connected;
 export const selectIsStreaming = (state: AppStore) => state.isStreaming;
 export const selectNotifications = (state: AppStore) => state.notifications; 
+export const selectDebugMessages = (state: AppStore) => state.debugMessages; 

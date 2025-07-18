@@ -223,6 +223,8 @@ export type WebSocketEventType =
   | 'ai_response'
   | 'ai_error'
   | 'user_message'
+  | 'get_context'
+  | 'debug_message'
   | 'ping'
   | 'pong';
 
@@ -234,4 +236,15 @@ export interface WebSocketEvent {
 }
 
 // UI View Types
-export type ActionView = 'function-call' | 'command-output' | 'context' | 'file-preview'; 
+export type ActionView = 'function-call' | 'command-output' | 'context' | 'file-preview' | 'debug-io';
+
+// Debug Message Types
+export interface DebugMessage {
+  id: string;
+  timestamp: Date;
+  direction: 'sent' | 'received';
+  type: 'websocket' | 'api' | 'error' | 'debug_message';
+  event?: string;
+  data: any;
+  rawJson: string;
+} 

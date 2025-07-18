@@ -1053,6 +1053,103 @@ func (c *ClaudeClient) ChatWithTools(message string) (string, error) {
 	}
 }
 
+// ChatWithToolsAndContext sends a conversation with context and function calling support
+func (c *ClaudeClient) ChatWithToolsAndContext(conversationMessages []ConversationMessage) (string, error) {
+	tools := c.getAvailableTools()
+	
+	// Convert conversation messages to Claude format
+	messages := make([]ClaudeMessage, 0, len(conversationMessages))
+	for _, msg := range conversationMessages {
+		messages = append(messages, ClaudeMessage{
+			Role:    msg.Role,
+			Content: msg.Content,
+		})
+	}
+
+	// If no messages, return error
+	if len(messages) == 0 {
+		return "", fmt.Errorf("no messages provided")
+	}
+
+	for {
+		request := ClaudeRequest{
+			Model:     c.model,
+			MaxTokens: 4000,
+			Messages:  messages,
+			Tools:     tools,
+			System:    "You are StackAgent, a helpful AI coding assistant with access to powerful file manipulation and shell command tools. Available functions: run_with_capture (shell commands), read_file (read files), write_file (create/write files), edit_file (find/replace in files), search_in_file (search with context), list_directory (list files with filters). Use these functions to efficiently help with coding tasks, file operations, and system administration. Be concise but helpful. Remember context from previous messages in this conversation.",
+		}
+
+		response, err := c.makeRequestWithTools(request)
+		if err != nil {
+			return "", err
+		}
+
+		// Check if Claude wants to use a tool
+		var toolUses []ToolUse
+		var textResponse string
+
+		for _, content := range response.Content {
+			if content.Type == "text" {
+				textResponse = content.Text
+			} else if content.Type == "tool_use" {
+				toolUses = append(toolUses, ToolUse{
+					Type:  content.Type,
+					ID:    content.ID,
+					Name:  content.Name,
+					Input: content.Input,
+				})
+			}
+		}
+
+		if len(toolUses) == 0 {
+			// No tools to execute, return the text response
+			return textResponse, nil
+		}
+
+		// Execute tools and prepare tool results
+		var toolResults []interface{}
+		for _, toolUse := range toolUses {
+			result, err := c.ExecuteFunction(toolUse)
+			if err != nil {
+				toolResults = append(toolResults, ToolResult{
+					Type:      "tool_result",
+					ToolUseID: toolUse.ID,
+					Content:   fmt.Sprintf("Error: %s", err.Error()),
+					IsError:   true,
+				})
+			} else {
+				toolResults = append(toolResults, ToolResult{
+					Type:      "tool_result",
+					ToolUseID: toolUse.ID,
+					Content:   result,
+				})
+			}
+		}
+
+		// Add Claude's response to the conversation
+		messages = append(messages, ClaudeMessage{
+			Role:    "assistant",
+			Content: response.Content,
+		})
+
+		// Add tool results to the conversation
+		messages = append(messages, ClaudeMessage{
+			Role:    "user",
+			Content: toolResults,
+		})
+
+		// Continue the conversation to get Claude's final response
+	}
+}
+
+// ConversationMessage represents a message in a conversation - matches web package structure
+type ConversationMessage struct {
+	Role      string    `json:"role"`
+	Content   string    `json:"content"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
 // Helper functions for parsing Claude's response
 func extractSection(text, section string) string {
 	lines := strings.Split(text, "\n")

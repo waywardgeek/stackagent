@@ -1,44 +1,28 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useAppStore, selectSelectedFunctionCall } from '@/store';
 import { FunctionCallDetails } from './FunctionCallDetails';
 import { ContextBrowser } from './ContextBrowser';
 import { CommandOutput } from './CommandOutput';
 import { FilePreview } from './FilePreview';
-import type { ActionView } from '@/types';
+import { DebugIOViewer } from './DebugIOViewer';
+import type { ActionView, WebSocketEventType } from '@/types';
 import { 
   Eye, 
   Terminal, 
   FileText, 
   Database, 
-  Info,
-  Zap
+  Zap,
+  Bug
 } from 'lucide-react';
 
-export const ActionPane: React.FC = () => {
+interface ActionPaneProps {
+  sendMessage: (type: WebSocketEventType, data: any) => void;
+}
+
+export const ActionPane: React.FC<ActionPaneProps> = ({ sendMessage }) => {
   const selectedFunctionCall = useAppStore(selectSelectedFunctionCall);
   const { functionCalls, commandExecutions } = useAppStore();
-  
-  // Determine what to show in the action pane
-  const getActiveView = (): ActionView => {
-    if (selectedFunctionCall) {
-      return 'function-call';
-    }
-    
-    // Show most recent function call if none selected
-    if (functionCalls.length > 0) {
-      return 'function-call';
-    }
-    
-    // Show most recent command execution
-    if (commandExecutions.length > 0) {
-      return 'command-output';
-    }
-    
-    // Default to context browser
-    return 'context';
-  };
-  
-  const activeView = getActiveView();
+  const [activeView, setActiveView] = useState<ActionView>('context');
   
   return (
     <div className="flex flex-col h-full">
@@ -49,6 +33,7 @@ export const ActionPane: React.FC = () => {
           {activeView === 'command-output' && 'Command Output'}
           {activeView === 'context' && 'Context Browser'}
           {activeView === 'file-preview' && 'File Preview'}
+          {activeView === 'debug-io' && 'JSON I/O Debug'}
         </h2>
         
         {/* View indicators */}
@@ -73,11 +58,15 @@ export const ActionPane: React.FC = () => {
         )}
         
         {activeView === 'context' && (
-          <ContextBrowser />
+          <ContextBrowser sendMessage={sendMessage} />
         )}
         
         {activeView === 'file-preview' && (
           <FilePreview />
+        )}
+        
+        {activeView === 'debug-io' && (
+          <DebugIOViewer />
         )}
         
         {/* Default empty state */}
@@ -104,24 +93,47 @@ export const ActionPane: React.FC = () => {
         )}
       </div>
       
-      {/* Quick actions */}
+      {/* Tab Navigation */}
       <div className="border-t border-secondary-200 dark:border-secondary-700 p-3">
         <div className="flex items-center space-x-2">
-          <button className="btn-ghost text-xs">
-            <Terminal className="w-4 h-4 mr-1" />
-            Commands
-          </button>
-          <button className="btn-ghost text-xs">
-            <FileText className="w-4 h-4 mr-1" />
-            Files
-          </button>
-          <button className="btn-ghost text-xs">
+          <button 
+            onClick={() => setActiveView('context')}
+            className={`btn-ghost text-xs ${activeView === 'context' ? 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' : ''}`}
+          >
             <Database className="w-4 h-4 mr-1" />
             Context
           </button>
-          <button className="btn-ghost text-xs">
-            <Info className="w-4 h-4 mr-1" />
-            Info
+          <button 
+            onClick={() => setActiveView('debug-io')}
+            className={`btn-ghost text-xs ${activeView === 'debug-io' ? 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' : ''}`}
+          >
+            <Bug className="w-4 h-4 mr-1" />
+            Debug I/O
+          </button>
+          {functionCalls.length > 0 && (
+            <button 
+              onClick={() => setActiveView('function-call')}
+              className={`btn-ghost text-xs ${activeView === 'function-call' ? 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' : ''}`}
+            >
+              <Zap className="w-4 h-4 mr-1" />
+              Functions
+            </button>
+          )}
+          {commandExecutions.length > 0 && (
+            <button 
+              onClick={() => setActiveView('command-output')}
+              className={`btn-ghost text-xs ${activeView === 'command-output' ? 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' : ''}`}
+            >
+              <Terminal className="w-4 h-4 mr-1" />
+              Commands
+            </button>
+          )}
+          <button 
+            onClick={() => setActiveView('file-preview')}
+            className={`btn-ghost text-xs ${activeView === 'file-preview' ? 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' : ''}`}
+          >
+            <FileText className="w-4 h-4 mr-1" />
+            Files
           </button>
         </div>
       </div>

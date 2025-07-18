@@ -12,22 +12,77 @@ import (
 	"stackagent/pkg/ai"
 )
 
-// WebSocketServer handles WebSocket connections for the GUI
-type WebSocketServer struct {
-	clients    map[*websocket.Conn]bool
-	broadcast  chan []byte
-	register   chan *websocket.Conn
-	unregister chan *websocket.Conn
-	mutex      sync.RWMutex
-	claude     *ai.ClaudeClient
-}
-
-// WebSocketEvent represents a WebSocket message
+// WebSocketEvent represents a message sent over WebSocket
 type WebSocketEvent struct {
 	Type      string      `json:"type"`
 	Data      interface{} `json:"data"`
 	Timestamp time.Time   `json:"timestamp"`
 	SessionID string      `json:"sessionId"`
+}
+
+// WebSocketEventType represents the type of WebSocket event
+type WebSocketEventType string
+
+const (
+	EventChatMessage WebSocketEventType = "chat_message"
+	EventUserMessage WebSocketEventType = "user_message"
+	EventAIResponse  WebSocketEventType = "ai_response"
+	EventAIError     WebSocketEventType = "ai_error"
+	EventPing        WebSocketEventType = "ping"
+	EventPong        WebSocketEventType = "pong"
+)
+
+// Use ConversationMessage from ai package
+type ConversationMessage = ai.ConversationMessage
+
+// ConversationContext holds the conversation history for a session
+type ConversationContext struct {
+	SessionID string                `json:"sessionId"`
+	Messages  []ConversationMessage `json:"messages"`
+	CreatedAt time.Time             `json:"createdAt"`
+	UpdatedAt time.Time             `json:"updatedAt"`
+	mutex     sync.RWMutex
+}
+
+// AddMessage adds a message to the conversation context
+func (c *ConversationContext) AddMessage(role, content string) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	
+	c.Messages = append(c.Messages, ConversationMessage{
+		Role:      role,
+		Content:   content,
+		Timestamp: time.Now(),
+	})
+	c.UpdatedAt = time.Now()
+}
+
+// GetMessages returns a copy of the conversation messages
+func (c *ConversationContext) GetMessages() []ConversationMessage {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+	
+	messages := make([]ConversationMessage, len(c.Messages))
+	copy(messages, c.Messages)
+	return messages
+}
+
+// ClearMessages clears all conversation messages
+func (c *ConversationContext) ClearMessages() {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	
+	c.Messages = []ConversationMessage{}
+	c.UpdatedAt = time.Now()
+}
+
+// WebSocketServer manages WebSocket connections and conversations
+type WebSocketServer struct {
+	upgrader      websocket.Upgrader
+	clients       map[*websocket.Conn]string
+	conversations map[string]*ConversationContext
+	claude        *ai.ClaudeClient
+	mutex         sync.RWMutex
 }
 
 // NewWebSocketServer creates a new WebSocket server
@@ -40,64 +95,24 @@ func NewWebSocketServer() *WebSocketServer {
 	}
 
 	return &WebSocketServer{
-		clients:    make(map[*websocket.Conn]bool),
-		broadcast:  make(chan []byte),
-		register:   make(chan *websocket.Conn),
-		unregister: make(chan *websocket.Conn),
-		claude:     claude,
+		upgrader: websocket.Upgrader{
+			CheckOrigin: func(r *http.Request) bool {
+				// Allow connections from any origin for development
+				// In production, you should restrict this
+				return true
+			},
+		},
+		clients:       make(map[*websocket.Conn]string),
+		conversations: make(map[string]*ConversationContext),
+		claude:        claude,
 	}
 }
 
-// Run starts the WebSocket server
-func (ws *WebSocketServer) Run() {
-	for {
-		select {
-		case client := <-ws.register:
-			ws.mutex.Lock()
-			ws.clients[client] = true
-			ws.mutex.Unlock()
-			log.Printf("Client connected. Total clients: %d", len(ws.clients))
-			
-			// Send welcome message
-			welcome := WebSocketEvent{
-				Type:      "session_started",
-				Data:      map[string]interface{}{"sessionId": fmt.Sprintf("session_%d", time.Now().Unix())},
-				Timestamp: time.Now(),
-				SessionID: "current",
-			}
-			ws.SendToClient(client, welcome)
-
-		case client := <-ws.unregister:
-			ws.mutex.Lock()
-			if _, ok := ws.clients[client]; ok {
-				delete(ws.clients, client)
-				client.Close()
-			}
-			ws.mutex.Unlock()
-			log.Printf("Client disconnected. Total clients: %d", len(ws.clients))
-
-		case message := <-ws.broadcast:
-			ws.mutex.RLock()
-			var failedClients []*websocket.Conn
-			for client := range ws.clients {
-				err := client.WriteMessage(websocket.TextMessage, message)
-				if err != nil {
-					client.Close()
-					failedClients = append(failedClients, client)
-				}
-			}
-			ws.mutex.RUnlock()
-			
-			// Remove failed clients
-			if len(failedClients) > 0 {
-				ws.mutex.Lock()
-				for _, client := range failedClients {
-					delete(ws.clients, client)
-				}
-				ws.mutex.Unlock()
-			}
-		}
-	}
+// GetConversationContext returns the conversation context for a session
+func (ws *WebSocketServer) GetConversationContext(sessionID string) *ConversationContext {
+	ws.mutex.RLock()
+	defer ws.mutex.RUnlock()
+	return ws.conversations[sessionID]
 }
 
 // SendToClient sends a message to a specific client
@@ -110,82 +125,88 @@ func (ws *WebSocketServer) SendToClient(client *websocket.Conn, event WebSocketE
 	return client.WriteMessage(websocket.TextMessage, message)
 }
 
-// BroadcastEvent sends an event to all connected clients
-func (ws *WebSocketServer) BroadcastEvent(eventType string, data interface{}) {
-	event := WebSocketEvent{
-		Type:      eventType,
-		Data:      data,
-		Timestamp: time.Now(),
-		SessionID: "current",
-	}
-
-	message, err := json.Marshal(event)
-	if err != nil {
-		log.Printf("Error marshaling event: %v", err)
-		return
-	}
-
-	select {
-	case ws.broadcast <- message:
-	default:
-		log.Printf("Broadcast channel full, dropping message")
-	}
+// generateSessionID generates a unique session ID
+func generateSessionID() string {
+	return fmt.Sprintf("session_%d", time.Now().UnixNano())
 }
 
 // HandleWebSocket handles WebSocket connections
 func (ws *WebSocketServer) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
-	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool {
-			// Allow connections from any origin for development
-			// In production, you should restrict this
-			return true
-		},
-	}
-
-	conn, err := upgrader.Upgrade(w, r, nil)
+	conn, err := ws.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("WebSocket upgrade error: %v", err)
 		return
 	}
 
-	// Register the client
-	ws.register <- conn
+	// Generate a unique session ID
+	sessionID := generateSessionID()
+	
+	// Register the connection with session ID
+	ws.mutex.Lock()
+	ws.clients[conn] = sessionID
+	// Create new conversation context for this session
+	ws.conversations[sessionID] = &ConversationContext{
+		SessionID: sessionID,
+		Messages:  []ConversationMessage{},
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	ws.mutex.Unlock()
 
-	// Handle messages from the client
-	go func() {
-		defer func() {
-			log.Printf("WebSocket handler exiting")
-			ws.unregister <- conn
-			conn.Close()
-		}()
+	log.Printf("Client connected with session ID: %s", sessionID)
 
-		log.Printf("WebSocket message loop started")
-		for {
-			_, messageBytes, err := conn.ReadMessage()
-			if err != nil {
-				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-					log.Printf("WebSocket error: %v", err)
-				} else {
-					log.Printf("WebSocket connection closed: %v", err)
-				}
-				break
+	// Send session started event
+	sessionStartedEvent := WebSocketEvent{
+		Type: "session_started",
+		Data: map[string]interface{}{
+			"sessionId": sessionID,
+			"message":   "WebSocket connection established",
+		},
+		Timestamp: time.Now(),
+		SessionID: sessionID,
+	}
+	ws.SendToClient(conn, sessionStartedEvent)
+
+	// Handle incoming messages
+	for {
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Printf("WebSocket error: %v", err)
+			} else {
+				log.Printf("WebSocket connection closed: %v", err)
 			}
-
-			// Handle incoming message
-			var event WebSocketEvent
-			if err := json.Unmarshal(messageBytes, &event); err != nil {
-				log.Printf("Error unmarshaling message: %v", err)
-				continue
-			}
-
-			// Process the event
-			ws.handleClientEvent(conn, event)
+			break
 		}
-	}()
+
+		// Parse the message
+		var event WebSocketEvent
+		if err := json.Unmarshal(message, &event); err != nil {
+			log.Printf("JSON unmarshal error: %v", err)
+			continue
+		}
+
+		// Set session ID if not provided
+		if event.SessionID == "" {
+			event.SessionID = sessionID
+		}
+
+		// Handle the event
+		ws.handleEvent(conn, event)
+	}
+
+	// Unregister the connection and clean up conversation
+	ws.mutex.Lock()
+	delete(ws.clients, conn)
+	delete(ws.conversations, sessionID)
+	ws.mutex.Unlock()
+
+	log.Printf("Client disconnected, session ID: %s", sessionID)
+	conn.Close()
 }
 
-// handleClientEvent processes events from clients
-func (ws *WebSocketServer) handleClientEvent(client *websocket.Conn, event WebSocketEvent) {
+// handleEvent processes events from clients
+func (ws *WebSocketServer) handleEvent(client *websocket.Conn, event WebSocketEvent) {
 	log.Printf("Received event from client: %s", event.Type)
 
 	switch event.Type {
@@ -200,16 +221,23 @@ func (ws *WebSocketServer) handleClientEvent(client *websocket.Conn, event WebSo
 		ws.SendToClient(client, pong)
 
 	case "get_context":
-		// Send context information
+		// Get the actual conversation context for this session
+		context := ws.GetConversationContext(event.SessionID)
+		if context == nil {
+			log.Printf("No conversation context found for session: %s", event.SessionID)
+			return
+		}
+		
+		// Send context information with real data
 		contextData := map[string]interface{}{
-			"sessionId":        "current",
-			"memoryEntries":    0,
+			"sessionId":        event.SessionID,
+			"memoryEntries":    len(context.Messages),
 			"knowledgeEntries": 0,
 			"commandHistory":   0,
 			"activeHandles":    0,
 			"activeFiles":      0,
-			"lastActivity":     time.Now(),
-			"createdAt":        time.Now(),
+			"lastActivity":     context.UpdatedAt,
+			"createdAt":        context.CreatedAt,
 		}
 		
 		response := WebSocketEvent{
@@ -252,7 +280,19 @@ func (ws *WebSocketServer) handleChatMessage(client *websocket.Conn, event WebSo
 
 	log.Printf("Received chat message: %s", message)
 
-	// Send user message confirmation
+	// Handle session ID race condition
+	actualSessionID := event.SessionID
+	if actualSessionID == "current" {
+		// Find the actual session ID for this connection
+		ws.mutex.RLock()
+		if realSessionID, exists := ws.clients[client]; exists {
+			actualSessionID = realSessionID
+			log.Printf("Correcting session ID from 'current' to '%s'", actualSessionID)
+		}
+		ws.mutex.RUnlock()
+	}
+
+	// Send user message confirmation with corrected session ID
 	userMessageResponse := WebSocketEvent{
 		Type: "user_message",
 		Data: map[string]interface{}{
@@ -261,7 +301,7 @@ func (ws *WebSocketServer) handleChatMessage(client *websocket.Conn, event WebSo
 			"timestamp": time.Now(),
 		},
 		Timestamp: time.Now(),
-		SessionID: event.SessionID,
+		SessionID: actualSessionID,
 	}
 	ws.SendToClient(client, userMessageResponse)
 
@@ -273,15 +313,93 @@ func (ws *WebSocketServer) handleChatMessage(client *websocket.Conn, event WebSo
 				"error": "Claude client not initialized. Please set ANTHROPIC_API_KEY environment variable.",
 			},
 			Timestamp: time.Now(),
-			SessionID: event.SessionID,
+			SessionID: actualSessionID,
 		}
 		ws.SendToClient(client, errorResponse)
 		return
 	}
 
+	// Get conversation context and add user message
+	context := ws.GetConversationContext(actualSessionID)
+	if context == nil {
+		// Create context if it doesn't exist
+		ws.mutex.Lock()
+		context = &ConversationContext{
+			SessionID: actualSessionID,
+			Messages:  []ConversationMessage{},
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+		ws.conversations[actualSessionID] = context
+		ws.mutex.Unlock()
+	}
+
+	// Check if there are messages in the "current" session that need to be transferred
+	if actualSessionID != "current" {
+		ws.mutex.Lock()
+		if currentContext, exists := ws.conversations["current"]; exists && len(currentContext.Messages) > 0 {
+			log.Printf("Transferring %d messages from 'current' session to '%s'", len(currentContext.Messages), actualSessionID)
+			// Transfer messages from "current" to actual session
+			for _, msg := range currentContext.Messages {
+				context.Messages = append(context.Messages, msg)
+			}
+			// Clear the current session
+			delete(ws.conversations, "current")
+		}
+		ws.mutex.Unlock()
+	}
+
+	context.AddMessage("user", message)
+	
+	// Send updated context information after adding user message
+	contextData := map[string]interface{}{
+		"sessionId":        actualSessionID,
+		"memoryEntries":    len(context.Messages),
+		"knowledgeEntries": 0,
+		"commandHistory":   0,
+		"activeHandles":    0,
+		"activeFiles":      0,
+		"lastActivity":     context.UpdatedAt,
+		"createdAt":        context.CreatedAt,
+	}
+	
+	contextResponse := WebSocketEvent{
+		Type:      "context_updated",
+		Data:      map[string]interface{}{"contextState": contextData},
+		Timestamp: time.Now(),
+		SessionID: actualSessionID,
+	}
+	ws.SendToClient(client, contextResponse)
+
 	// Send AI response in a goroutine to avoid blocking
 	go func() {
-		response, err := ws.claude.ChatWithTools(message)
+		var response string
+		var err error
+		
+		// Get conversation history
+		messages := context.GetMessages()
+		
+		// Send debug information about what we're sending to Claude
+		debugInfo := map[string]interface{}{
+			"type":        "claude_api_request",
+			"message":     "Sending request to Claude API",
+			"messageCount": len(messages),
+			"messages":    messages,
+			"hasSystemPrompt": true,
+			"systemPrompt":    "You are StackAgent, a helpful AI coding assistant with access to powerful file manipulation and shell command tools. Available functions: run_with_capture (shell commands), read_file (read files), write_file (create/write files), edit_file (find/replace in files), search_in_file (search with context), list_directory (list files with filters). Use these functions to efficiently help with coding tasks, file operations, and system administration. Be concise but helpful. Remember context from previous messages in this conversation.",
+		}
+		
+		debugEvent := WebSocketEvent{
+			Type: "debug_message",
+			Data: debugInfo,
+			Timestamp: time.Now(),
+			SessionID: actualSessionID,
+		}
+		ws.SendToClient(client, debugEvent)
+		
+		// Convert to Claude format and send with context
+		response, err = ws.claude.ChatWithToolsAndContext(messages)
+		
 		if err != nil {
 			log.Printf("Claude API error: %v", err)
 			errorResponse := WebSocketEvent{
@@ -290,11 +408,14 @@ func (ws *WebSocketServer) handleChatMessage(client *websocket.Conn, event WebSo
 					"error": fmt.Sprintf("Failed to get AI response: %v", err),
 				},
 				Timestamp: time.Now(),
-				SessionID: event.SessionID,
+				SessionID: actualSessionID,
 			}
 			ws.SendToClient(client, errorResponse)
 			return
 		}
+
+		// Add AI response to conversation context
+		context.AddMessage("assistant", response)
 
 		// Send AI response
 		aiResponse := WebSocketEvent{
@@ -304,9 +425,29 @@ func (ws *WebSocketServer) handleChatMessage(client *websocket.Conn, event WebSo
 				"timestamp": time.Now(),
 			},
 			Timestamp: time.Now(),
-			SessionID: event.SessionID,
+			SessionID: actualSessionID,
 		}
 		ws.SendToClient(client, aiResponse)
+
+		// Send updated context information
+		contextData := map[string]interface{}{
+			"sessionId":        actualSessionID,
+			"memoryEntries":    len(context.Messages),
+			"knowledgeEntries": 0,
+			"commandHistory":   0,
+			"activeHandles":    0,
+			"activeFiles":      0,
+			"lastActivity":     context.UpdatedAt,
+			"createdAt":        context.CreatedAt,
+		}
+		
+		contextResponse := WebSocketEvent{
+			Type:      "context_updated",
+			Data:      map[string]interface{}{"contextState": contextData},
+			Timestamp: time.Now(),
+			SessionID: actualSessionID,
+		}
+		ws.SendToClient(client, contextResponse)
 	}()
 }
 
