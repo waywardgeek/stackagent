@@ -215,6 +215,16 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
             duration: data.data.duration,
           });
           
+          // CRITICAL FIX: Also update the function call to show completion/failure in the widget
+          const shellStatus = data.data.exitCode === 0 ? 'completed' : 'failed';
+          storeRef.current.updateFunctionCall(data.data.id, {
+            status: shellStatus,
+            result: data.data.output,
+            error: data.data.exitCode !== 0 ? `Command failed with exit code ${data.data.exitCode}` : undefined,
+            endTime: new Date(),
+            duration: data.data.duration,
+          });
+          
           completeStreamingOperation(data.data.id);
           break;
           
@@ -237,6 +247,14 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
             content: data.data.content,
             changes: data.data.changes,
             size: data.data.size,
+          });
+          
+          // CRITICAL FIX: Also update the function call to show completion in the widget
+          storeRef.current.updateFunctionCall(data.data.id, {
+            status: 'completed',
+            result: data.data.content || data.data.changes,
+            endTime: new Date(),
+            duration: data.data.duration,
           });
           
           completeStreamingOperation(data.data.id);
