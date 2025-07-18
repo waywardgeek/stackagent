@@ -515,9 +515,9 @@ func (ws *WebSocketServer) handleChatMessage(client *websocket.Conn, event WebSo
 		})
 		
 		// FIXED: Re-enable streaming with safeguards
-		// Start with basic events only to test the fix
+		// Enable completion events for widgets to work properly
 		ws.claude.SetStreamingCallback(func(eventType string, data interface{}) {
-			// Only enable safe, essential streaming events
+			// Enable essential streaming events with session cleanup protection
 			switch eventType {
 			case "function_call_start":
 				ws.SendStreamingEvent(actualSessionID, EventFunctionCallStarted, data)
@@ -525,7 +525,19 @@ func (ws *WebSocketServer) handleChatMessage(client *websocket.Conn, event WebSo
 				ws.SendStreamingEvent(actualSessionID, EventFunctionCallCompleted, data)
 			case "function_call_error":
 				ws.SendStreamingEvent(actualSessionID, EventFunctionCallFailed, data)
-			// TODO: Add shell and file operations after testing basic function calls
+			// Enable shell command completion for widgets
+			case "shell_command_started":
+				ws.SendStreamingEvent(actualSessionID, EventShellCommandStarted, data)
+			case "shell_command_completed":
+				ws.SendStreamingEvent(actualSessionID, EventShellCommandCompleted, data)
+			// Enable file operation completion for widgets  
+			case "file_operation_started":
+				ws.SendStreamingEvent(actualSessionID, EventFileOperationStarted, data)
+			case "file_operation_completed":
+				ws.SendStreamingEvent(actualSessionID, EventFileOperationCompleted, data)
+			// Skip streaming events that caused infinite loops
+			// case "shell_command_streaming": // DISABLED - caused loops
+			// case "file_operation_streaming": // DISABLED - caused loops
 			}
 		})
 		
