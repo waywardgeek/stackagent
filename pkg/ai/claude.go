@@ -440,6 +440,14 @@ func (c *ClaudeClient) makeAPICall(system, user string) (*ClaudeResponse, error)
 	return &response, nil
 }
 
+// debugLog logs debug information to the debug file
+func (c *ClaudeClient) debugLog(direction, content string) {
+	if c.debugFile != nil {
+		timestamp := time.Now().Format("2006-01-02 15:04:05")
+		c.debugFile.WriteString(fmt.Sprintf("[%s] %s:\n%s\n\n", timestamp, direction, content))
+	}
+}
+
 // getAvailableTools returns the list of available tools for function calling
 func (c *ClaudeClient) getAvailableTools() []Tool {
 	return []Tool{
@@ -497,6 +505,53 @@ func (c *ClaudeClient) executeFunction(toolUse ToolUse) (string, error) {
 	}
 }
 
+// makeRequestWithTools makes an HTTP request with function calling support
+func (c *ClaudeClient) makeRequestWithTools(request ClaudeRequest) (*ClaudeResponse, error) {
+	requestBody, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	if c.debugEnabled {
+		c.debugLog("REQUEST", string(requestBody))
+	}
+
+	req, err := http.NewRequest("POST", c.baseURL, bytes.NewBuffer(requestBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", c.apiKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to make request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if c.debugEnabled {
+		c.debugLog("RESPONSE", string(responseBody))
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(responseBody))
+	}
+
+	var response ClaudeResponse
+	if err := json.Unmarshal(responseBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	return &response, nil
+}
+
 // ChatWithTools sends a chat message with function calling support
 func (c *ClaudeClient) ChatWithTools(message string) (string, error) {
 	tools := c.getAvailableTools()
@@ -514,10 +569,10 @@ func (c *ClaudeClient) ChatWithTools(message string) (string, error) {
 			MaxTokens: 4000,
 			Messages:  messages,
 			Tools:     tools,
-			System:    "You are a helpful AI assistant with access to shell commands through the run_with_capture function. Use this function when users ask you to execute commands, check system status, or perform any tasks that require shell access.",
+			System:    "You are StackAgent, a helpful AI coding assistant with access to shell commands through the run_with_capture function. Use this function when users ask you to execute commands, check system status, or perform any tasks that require shell access. Be concise but helpful.",
 		}
 
-		response, err := c.makeAPICall(request.System, request.Messages[len(request.Messages)-1].Content.(string))
+		response, err := c.makeRequestWithTools(request)
 		if err != nil {
 			return "", err
 		}

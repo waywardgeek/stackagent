@@ -281,7 +281,7 @@ func (ws *WebSocketServer) handleChatMessage(client *websocket.Conn, event WebSo
 
 	// Send AI response in a goroutine to avoid blocking
 	go func() {
-		response, err := ws.claude.Chat(message)
+		response, err := ws.claude.ChatWithTools(message)
 		if err != nil {
 			log.Printf("Claude API error: %v", err)
 			errorResponse := WebSocketEvent{
