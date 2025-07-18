@@ -1,0 +1,27 @@
+{
+  "active_files": [],
+  "command_history": [
+    {
+      "command": "ls -la",
+      "handle_id": 1,
+      "timestamp": "2025-07-17T17:45:21.252074343-07:00",
+      "exit_code": 0,
+      "duration": "200.855809ms"
+    },
+    {
+      "command": "whoami",
+      "handle_id": 2,
+      "timestamp": "2025-07-17T17:45:21.456417114-07:00",
+      "exit_code": 0,
+      "duration": "200.821378ms"
+    }
+  ],
+  "working_dir": "",
+  "active_handles": [
+    1,
+    2
+  ],
+  "current_task": "",
+  "project_context": "",
+  "last_activity": "2025-07-17T17:45:21.456812907-07:00"
+}

@@ -15,24 +15,59 @@ import (
 
 // Claude API client
 type ClaudeClient struct {
-	apiKey     string
-	baseURL    string
-	httpClient *http.Client
-	model      string
-	debugFile  *os.File
+	apiKey      string
+	baseURL     string
+	httpClient  *http.Client
+	model       string
+	debugFile   *os.File
 	debugEnabled bool
+	shellManager *shell.ShellManager
+}
+
+// Tool definition for function calling
+type Tool struct {
+	Name         string      `json:"name"`
+	Description  string      `json:"description"`
+	InputSchema  InputSchema `json:"input_schema"`
+}
+
+type InputSchema struct {
+	Type       string              `json:"type"`
+	Properties map[string]Property `json:"properties"`
+	Required   []string            `json:"required"`
+}
+
+type Property struct {
+	Type        string `json:"type"`
+	Description string `json:"description"`
+}
+
+// Tool use structures for Claude responses
+type ToolUse struct {
+	Type  string                 `json:"type"`
+	ID    string                 `json:"id"`
+	Name  string                 `json:"name"`
+	Input map[string]interface{} `json:"input"`
+}
+
+type ToolResult struct {
+	Type       string `json:"type"`
+	ToolUseID  string `json:"tool_use_id"`
+	Content    string `json:"content"`
+	IsError    bool   `json:"is_error,omitempty"`
 }
 
 // Claude API request/response structures
 type ClaudeMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string      `json:"role"`
+	Content interface{} `json:"content"`
 }
 
 type ClaudeRequest struct {
 	Model     string          `json:"model"`
 	MaxTokens int             `json:"max_tokens"`
 	Messages  []ClaudeMessage `json:"messages"`
+	Tools     []Tool          `json:"tools,omitempty"`
 	System    string          `json:"system,omitempty"`
 }
 
@@ -41,8 +76,11 @@ type ClaudeResponse struct {
 	Type    string `json:"type"`
 	Role    string `json:"role"`
 	Content []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
+		Type  string                 `json:"type"`
+		Text  string                 `json:"text,omitempty"`
+		ID    string                 `json:"id,omitempty"`
+		Name  string                 `json:"name,omitempty"`
+		Input map[string]interface{} `json:"input,omitempty"`
 	} `json:"content"`
 	Model        string `json:"model"`
 	StopReason   string `json:"stop_reason"`
@@ -97,8 +135,8 @@ func NewClaudeClient() (*ClaudeClient, error) {
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		model: "claude-sonnet-4-20250514", // Latest Claude Sonnet 4
-		debugEnabled: false,
+		model:        "claude-sonnet-4-20250514", // Latest Claude Sonnet 4
+		shellManager: shell.NewShellManager(),
 	}, nil
 }
 
@@ -400,6 +438,146 @@ func (c *ClaudeClient) makeAPICall(system, user string) (*ClaudeResponse, error)
 	}
 
 	return &response, nil
+}
+
+// getAvailableTools returns the list of available tools for function calling
+func (c *ClaudeClient) getAvailableTools() []Tool {
+	return []Tool{
+		{
+			Name:        "run_with_capture",
+			Description: "Execute a shell command and capture its output for analysis. Returns a handle that can be used to query the output.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"command": {
+						Type:        "string",
+						Description: "The shell command to execute",
+					},
+				},
+				Required: []string{"command"},
+			},
+		},
+	}
+}
+
+// executeFunction executes a function call and returns the result
+func (c *ClaudeClient) executeFunction(toolUse ToolUse) (string, error) {
+	switch toolUse.Name {
+	case "run_with_capture":
+		command, ok := toolUse.Input["command"].(string)
+		if !ok {
+			return "", fmt.Errorf("invalid command parameter")
+		}
+
+		handle, err := c.shellManager.RunWithCapture(command)
+		if err != nil {
+			return "", fmt.Errorf("failed to execute command: %w", err)
+		}
+
+		// Wait a moment for some output to be captured
+		time.Sleep(100 * time.Millisecond)
+
+		// Get the current output
+		output, err := c.shellManager.GetTail(handle.ID, 50) // Get last 50 lines
+		if err != nil {
+			output = "No output captured yet"
+		}
+
+		result := fmt.Sprintf("Command executed successfully. Handle ID: %d\n\nOutput:\n%s", handle.ID, output)
+		
+		if handle.Complete {
+			result += fmt.Sprintf("\n\nCommand completed with exit code: %d", handle.ExitCode)
+		} else {
+			result += "\n\nCommand is still running..."
+		}
+
+		return result, nil
+	default:
+		return "", fmt.Errorf("unknown function: %s", toolUse.Name)
+	}
+}
+
+// ChatWithTools sends a chat message with function calling support
+func (c *ClaudeClient) ChatWithTools(message string) (string, error) {
+	tools := c.getAvailableTools()
+	
+	messages := []ClaudeMessage{
+		{
+			Role:    "user",
+			Content: message,
+		},
+	}
+
+	for {
+		request := ClaudeRequest{
+			Model:     c.model,
+			MaxTokens: 4000,
+			Messages:  messages,
+			Tools:     tools,
+			System:    "You are a helpful AI assistant with access to shell commands through the run_with_capture function. Use this function when users ask you to execute commands, check system status, or perform any tasks that require shell access.",
+		}
+
+		response, err := c.makeAPICall(request.System, request.Messages[len(request.Messages)-1].Content.(string))
+		if err != nil {
+			return "", err
+		}
+
+		// Check if Claude wants to use a tool
+		var toolUses []ToolUse
+		var textResponse string
+
+		for _, content := range response.Content {
+			if content.Type == "text" {
+				textResponse = content.Text
+			} else if content.Type == "tool_use" {
+				toolUses = append(toolUses, ToolUse{
+					Type:  content.Type,
+					ID:    content.ID,
+					Name:  content.Name,
+					Input: content.Input,
+				})
+			}
+		}
+
+		if len(toolUses) == 0 {
+			// No tools to execute, return the text response
+			return textResponse, nil
+		}
+
+		// Execute tools and prepare tool results
+		var toolResults []interface{}
+		for _, toolUse := range toolUses {
+			result, err := c.executeFunction(toolUse)
+			if err != nil {
+				toolResults = append(toolResults, ToolResult{
+					Type:      "tool_result",
+					ToolUseID: toolUse.ID,
+					Content:   fmt.Sprintf("Error: %s", err.Error()),
+					IsError:   true,
+				})
+			} else {
+				toolResults = append(toolResults, ToolResult{
+					Type:      "tool_result",
+					ToolUseID: toolUse.ID,
+					Content:   result,
+				})
+			}
+		}
+
+		// Add Claude's response to the conversation
+		messages = append(messages, ClaudeMessage{
+			Role:    "assistant",
+			Content: response.Content,
+		})
+
+		// Add tool results to the conversation
+		messages = append(messages, ClaudeMessage{
+			Role:    "user",
+			Content: toolResults,
+		})
+
+		// Continue the conversation to get Claude's final response
+	}
 }
 
 // Helper functions for parsing Claude's response

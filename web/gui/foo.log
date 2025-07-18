@@ -1,0 +1,26 @@
+main-CTgQasPQ.js:362 WebSocket connection to 'ws://localhost:8080/ws' failed: WebSocket is closed before the connection is established.
+(anonymous) @ main-CTgQasPQ.js:362
+VM4 sandbox_bundle:2 Electron Security Warning (Insecure Content-Security-Policy) This renderer process has either no Content Security
+  Policy set or a policy with "unsafe-eval" enabled. This exposes users of
+  this app to unnecessary security risks.
+
+For more information and help, consult
+https://electronjs.org/docs/tutorial/security.
+This warning will not show up
+once the app is packaged.
+warnAboutInsecureCSP @ VM4 sandbox_bundle:2
+main-CTgQasPQ.js:362 WebSocket not connected, cannot send message
+(anonymous) @ main-CTgQasPQ.js:362
+d @ main-CTgQasPQ.js:362
+uf @ main-CTgQasPQ.js:37
+df @ main-CTgQasPQ.js:37
+ff @ main-CTgQasPQ.js:37
+yu @ main-CTgQasPQ.js:37
+vu @ main-CTgQasPQ.js:37
+(anonymous) @ main-CTgQasPQ.js:37
+fo @ main-CTgQasPQ.js:40
+Ca @ main-CTgQasPQ.js:37
+dl @ main-CTgQasPQ.js:37
+Vs @ main-CTgQasPQ.js:37
+Pf @ main-CTgQasPQ.js:37
+Warning: Don’t paste code into the DevTools Console that you don’t understand or haven’t reviewed yourself. This could allow attackers to steal your identity or take control of your computer. Please type ‘allow pasting’ below and hit Enter to allow pasting.
