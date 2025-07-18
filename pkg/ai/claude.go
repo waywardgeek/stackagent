@@ -677,13 +677,21 @@ func (c *ClaudeClient) getAvailableTools() []Tool {
 
 // ExecuteFunction executes a function call and returns the result
 func (c *ClaudeClient) ExecuteFunction(toolUse ToolUse) (string, error) {
+	// Record start time for duration calculation
+	startTime := time.Now()
+	
+	// Helper function to calculate duration
+	getDuration := func() float64 {
+		return time.Since(startTime).Seconds()
+	}
+	
 	// Send streaming event for function start
 	if c.streamingCallback != nil {
 		c.streamingCallback("function_call_start", map[string]interface{}{
 			"id":           toolUse.ID,
 			"name":         toolUse.Name,
 			"arguments":    toolUse.Input,
-			"timestamp":    time.Now(),
+			"timestamp":    startTime,
 		})
 	}
 	
@@ -734,11 +742,19 @@ func (c *ClaudeClient) ExecuteFunction(toolUse ToolUse) (string, error) {
 
 		// Send shell command completed event
 		if c.streamingCallback != nil {
+			// Calculate duration from handle statistics
+			stats, _ := c.shellManager.GetStats(handle.ID)
+			duration := 0.0
+			if stats != nil {
+				duration = stats.Duration.Seconds()
+			}
+			
 			c.streamingCallback("shell_command_completed", map[string]interface{}{
 				"id":         toolUse.ID,
 				"command":    command,
 				"output":     output,
 				"exitCode":   handle.ExitCode,
+				"duration":   duration,
 				"complete":   handle.Complete,
 				"timestamp":  time.Now(),
 			})
@@ -799,6 +815,7 @@ func (c *ClaudeClient) ExecuteFunction(toolUse ToolUse) (string, error) {
 							"filePath":   filePath,
 							"size":       len(result),
 							"lines":      maxLines,
+							"duration":   getDuration(),
 							"timestamp":  time.Now(),
 						})
 					}
@@ -818,6 +835,7 @@ func (c *ClaudeClient) ExecuteFunction(toolUse ToolUse) (string, error) {
 				"filePath":   filePath,
 				"size":       len(string(content)),
 				"lines":      len(lines),
+				"duration":   getDuration(),
 				"timestamp":  time.Now(),
 			})
 		}
@@ -903,6 +921,7 @@ func (c *ClaudeClient) ExecuteFunction(toolUse ToolUse) (string, error) {
 					"type":       "append",
 					"filePath":   filePath,
 					"size":       len(content),
+					"duration":   getDuration(),
 					"timestamp":  time.Now(),
 				})
 			}
@@ -930,6 +949,7 @@ func (c *ClaudeClient) ExecuteFunction(toolUse ToolUse) (string, error) {
 					"type":       "write",
 					"filePath":   filePath,
 					"size":       len(content),
+					"duration":   getDuration(),
 					"timestamp":  time.Now(),
 				})
 			}
@@ -1190,6 +1210,7 @@ func (c *ClaudeClient) ExecuteFunction(toolUse ToolUse) (string, error) {
 					"type":       "list",
 					"dirPath":    dirPath,
 					"fileCount":  0,
+					"duration":   getDuration(),
 					"timestamp":  time.Now(),
 				})
 			}
@@ -1206,6 +1227,7 @@ func (c *ClaudeClient) ExecuteFunction(toolUse ToolUse) (string, error) {
 				"type":       "list",
 				"dirPath":    dirPath,
 				"fileCount":  len(files),
+				"duration":   getDuration(),
 				"timestamp":  time.Now(),
 			})
 		}
