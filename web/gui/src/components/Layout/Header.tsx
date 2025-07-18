@@ -38,9 +38,6 @@ export const Header: React.FC = () => {
             <p className="text-xs text-secondary-500 dark:text-secondary-400">
               AI Coding Assistant
             </p>
-            <p className="text-xs text-secondary-400 dark:text-secondary-500 italic">
-              Don't be evil
-            </p>
           </div>
         </div>
         
@@ -71,12 +68,17 @@ export const Header: React.FC = () => {
           </div>
         )}
         
-        {/* AI Model */}
-        <div className="session-info">
-          <span className="text-xs">Model:</span>
-          <span className="font-medium ml-1">
-            {selectedModel.includes('claude-sonnet-4') ? 'Claude 4' : selectedModel.split('-')[0]}
-          </span>
+        {/* AI Model with motto */}
+        <div className="flex flex-col items-center">
+          <div className="session-info">
+            <span className="text-xs">Model:</span>
+            <span className="font-medium ml-1">
+              {selectedModel.includes('claude-sonnet-4') ? 'Claude 4' : selectedModel.split('-')[0]}
+            </span>
+          </div>
+          <div className="text-xs text-secondary-400 dark:text-secondary-500 italic">
+            Don't be evil
+          </div>
         </div>
         
         {/* Session cost */}
