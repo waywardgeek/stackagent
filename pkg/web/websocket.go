@@ -474,13 +474,8 @@ func (ws *WebSocketServer) handleChatMessage(client *websocket.Conn, event WebSo
 		var operationSummary ai.OperationSummary
 		var err error
 		
-		// Set up streaming callback for real-time operations
-		ws.SetStreamingCallback(actualSessionID, func(eventType WebSocketEventType, data interface{}, sessionID string) {
-			// Handle streaming events from Claude client
-			ws.SendStreamingEvent(sessionID, eventType, data)
-		})
-		
-		// Set up debug callback for function calls (backward compatibility)
+		// EMERGENCY: Disable all streaming to fix infinite loop
+		// Set up basic debug callback only
 		ws.claude.SetDebugCallback(func(eventType string, data interface{}) {
 			debugEvent := WebSocketEvent{
 				Type: "debug_message",
@@ -495,18 +490,8 @@ func (ws *WebSocketServer) handleChatMessage(client *websocket.Conn, event WebSo
 			ws.SendToClient(client, debugEvent)
 		})
 		
-		// Set up enhanced streaming callback for the Claude client
-		ws.claude.SetStreamingCallback(func(eventType string, data interface{}) {
-			// Convert debug events to streaming events
-			switch eventType {
-			case "function_call_start":
-				ws.SendStreamingEvent(actualSessionID, EventFunctionCallStarted, data)
-			case "function_call_success", "function_call_complete":
-				ws.SendStreamingEvent(actualSessionID, EventFunctionCallCompleted, data)
-			case "function_call_error":
-				ws.SendStreamingEvent(actualSessionID, EventFunctionCallFailed, data)
-			}
-		})
+		// Disable streaming callback entirely
+		ws.claude.SetStreamingCallback(nil)
 		
 		// Get conversation history
 		messages := context.GetMessages()
