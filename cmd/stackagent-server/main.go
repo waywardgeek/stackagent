@@ -120,6 +120,7 @@ func main() {
 	log.Printf("📡 WebSocket endpoint: ws://localhost:%s/ws", port)
 	log.Printf("🌐 GUI available at: http://localhost:%s", port)
 	log.Printf("🔧 API health check: http://localhost:%s/api/health", port)
+	log.Printf("⚖️  Core principle: Don't be evil")
 	
 	if err := http.ListenAndServe(":"+port, mux); err != nil {
 		log.Fatal("Server failed to start:", err)

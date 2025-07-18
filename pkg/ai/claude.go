@@ -1067,7 +1067,7 @@ func (c *ClaudeClient) ChatWithTools(message string) (string, TokenCost, error) 
 		systemPrompt := []ContentBlock{
 			{
 				Type: "text",
-				Text: "You are StackAgent, a helpful AI coding assistant with access to powerful file manipulation and shell command tools. Available functions: run_with_capture (shell commands), read_file (read files), write_file (create/write files), edit_file (find/replace in files), search_in_file (search with context), list_directory (list files with filters). Use these functions to efficiently help with coding tasks, file operations, and system administration. Be concise but helpful.",
+				Text: "You are StackAgent, a helpful AI coding assistant with access to powerful file manipulation and shell command tools. Available functions: run_with_capture (shell commands), read_file (read files), write_file (create/write files), edit_file (find/replace in files), search_in_file (search with context), list_directory (list files with filters). Use these functions to efficiently help with coding tasks, file operations, and system administration. Be concise but helpful. Remember context from previous messages in this conversation.\n\nCore principle: Don't be evil. Always prioritize user safety, privacy, and ethical behavior.",
 				CacheControl: &CacheControl{Type: "ephemeral"}, // Cache system prompt
 			},
 		}
@@ -1176,7 +1176,7 @@ func (c *ClaudeClient) ChatWithToolsAndContext(conversationMessages []Conversati
 		systemPrompt := []ContentBlock{
 			{
 				Type: "text",
-				Text: "You are StackAgent, a helpful AI coding assistant with access to powerful file manipulation and shell command tools. Available functions: run_with_capture (shell commands), read_file (read files), write_file (create/write files), edit_file (find/replace in files), search_in_file (search with context), list_directory (list files with filters). Use these functions to efficiently help with coding tasks, file operations, and system administration. Be concise but helpful. Remember context from previous messages in this conversation.",
+				Text: "You are StackAgent, a helpful AI coding assistant with access to powerful file manipulation and shell command tools. Available functions: run_with_capture (shell commands), read_file (read files), write_file (create/write files), edit_file (find/replace in files), search_in_file (search with context), list_directory (list files with filters). Use these functions to efficiently help with coding tasks, file operations, and system administration. Be concise but helpful. Remember context from previous messages in this conversation.\n\nCore principle: Don't be evil. Always prioritize user safety, privacy, and ethical behavior.",
 				CacheControl: &CacheControl{Type: "ephemeral"}, // Cache system prompt
 			},
 		}

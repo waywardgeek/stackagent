@@ -239,42 +239,22 @@ export const ContextBrowser: React.FC<ContextBrowserProps> = ({ sendMessage }) =
       </div>
 
       {/* Debug Information */}
-      <div>
-        <h3 className="font-medium text-secondary-900 dark:text-secondary-100 mb-3 flex items-center">
-          <Database className="w-4 h-4 mr-2" />
-          Debug Information
-        </h3>
-        <div className="space-y-2">
-          <div className="flex justify-between text-sm">
-            <span className="text-secondary-600 dark:text-secondary-400">WebSocket Status</span>
-            <span className={`text-sm font-medium ${connected ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-              {connected ? 'Connected' : 'Disconnected'}
-            </span>
-          </div>
-          <div className="flex justify-between text-sm">
-            <span className="text-secondary-600 dark:text-secondary-400">Total Messages</span>
-            <span className="text-secondary-900 dark:text-secondary-100">
-              {messages.length}
-            </span>
-          </div>
-          <div className="flex justify-between text-sm">
-            <span className="text-secondary-600 dark:text-secondary-400">User Messages</span>
-            <span className="text-secondary-900 dark:text-secondary-100">
-              {messages.filter(m => m.type === 'user').length}
-            </span>
-          </div>
-          <div className="flex justify-between text-sm">
-            <span className="text-secondary-600 dark:text-secondary-400">AI Messages</span>
-            <span className="text-secondary-900 dark:text-secondary-100">
-              {messages.filter(m => m.type === 'assistant').length}
-            </span>
-          </div>
-          <div className="flex justify-between text-sm">
-            <span className="text-secondary-600 dark:text-secondary-400">Unique Sessions</span>
-            <span className="text-secondary-900 dark:text-secondary-100">
-              {new Set(messages.map(m => m.sessionId)).size}
-            </span>
-          </div>
+      <div className="mt-6 text-center">
+        <div className="flex items-center justify-center space-x-2 mb-2">
+          <button
+            onClick={handleRefreshContext}
+            className="flex items-center space-x-1 text-xs px-3 py-1 bg-primary-100 hover:bg-primary-200 text-primary-700 rounded-md dark:bg-primary-900 dark:hover:bg-primary-800 dark:text-primary-300"
+            disabled={!connected}
+          >
+            <RefreshCw className="w-3 h-3" />
+            <span>Refresh Context</span>
+          </button>
+        </div>
+        <div className="text-xs text-secondary-500 dark:text-secondary-400">
+          Session: {contextState?.sessionId || 'Not connected'}
+        </div>
+        <div className="text-xs text-secondary-400 dark:text-secondary-500 mt-2 italic">
+          Core principle: Don't be evil
         </div>
       </div>
     </div>
