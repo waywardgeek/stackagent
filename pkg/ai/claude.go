@@ -97,7 +97,7 @@ func NewClaudeClient() (*ClaudeClient, error) {
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		model: "claude-3-5-sonnet-20241022", // Latest Claude 3.5 Sonnet
+		model: "claude-sonnet-4-20250514", // Latest Claude Sonnet 4
 		debugEnabled: false,
 	}, nil
 }
@@ -165,15 +165,16 @@ func (c *ClaudeClient) SetModel(model string) {
 // GetAvailableModels returns list of available Claude models
 func (c *ClaudeClient) GetAvailableModels() []string {
 	return []string{
-		"claude-3-5-sonnet-20241022", // Latest Claude 3.5 Sonnet (recommended)
-		"claude-3-5-haiku-20241022",  // Fast and cheap
-		"claude-3-opus-20240229",     // Most capable
+		"claude-sonnet-4-20250514",        // Latest Claude Sonnet 4 (recommended)
+		"claude-3-5-sonnet-20241022",      // Claude 3.5 Sonnet (previous)
+		"claude-3-5-haiku-20241022",       // Fast and cheap
+		"claude-3-opus-20240229",          // Most capable Claude 3
 	}
 }
 
 // EstimateCost estimates the cost of a request
 func (c *ClaudeClient) EstimateCost(inputTokens, outputTokens int) float64 {
-	// Claude 3.5 Sonnet pricing: $3/1M input, $15/1M output
+	// Claude 4 Sonnet pricing: $3/1M input, $15/1M output
 	inputCost := float64(inputTokens) * 3.00 / 1000000
 	outputCost := float64(outputTokens) * 15.00 / 1000000
 	return inputCost + outputCost

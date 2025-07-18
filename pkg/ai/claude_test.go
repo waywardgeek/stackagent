@@ -29,8 +29,8 @@ func TestNewClaudeClient(t *testing.T) {
 		t.Errorf("Expected API key 'test-key', got: %s", client.apiKey)
 	}
 	
-	if client.model != "claude-3-5-sonnet-20241022" {
-		t.Errorf("Expected default model 'claude-3-5-sonnet-20241022', got: %s", client.model)
+	if client.model != "claude-sonnet-4-20250514" {
+		t.Errorf("Expected default model 'claude-sonnet-4-20250514', got: %s", client.model)
 	}
 }
 
@@ -62,6 +62,7 @@ func TestGetAvailableModels(t *testing.T) {
 	
 	models := client.GetAvailableModels()
 	expectedModels := []string{
+		"claude-sonnet-4-20250514",
 		"claude-3-5-sonnet-20241022",
 		"claude-3-5-haiku-20241022",
 		"claude-3-opus-20240229",
@@ -226,7 +227,7 @@ func TestIntegrationWithShellManager(t *testing.T) {
 // Mock test for API structure validation
 func TestClaudeRequestStructure(t *testing.T) {
 	request := ClaudeRequest{
-		Model:     "claude-3-5-sonnet-20241022",
+		Model:     "claude-sonnet-4-20250514",
 		MaxTokens: 1024,
 		System:    "You are a helpful assistant",
 		Messages: []ClaudeMessage{
@@ -234,7 +235,7 @@ func TestClaudeRequestStructure(t *testing.T) {
 		},
 	}
 	
-	if request.Model != "claude-3-5-sonnet-20241022" {
+	if request.Model != "claude-sonnet-4-20250514" {
 		t.Error("Model not set correctly")
 	}
 	
@@ -310,7 +311,7 @@ func TestDebugLogEntry(t *testing.T) {
 			"Content-Type": "application/json",
 		},
 		Body: map[string]interface{}{
-			"model": "claude-3-5-sonnet-20241022",
+			"model": "claude-sonnet-4-20250514",
 		},
 	}
 	
@@ -334,8 +335,8 @@ func TestDebugLogEntry(t *testing.T) {
 		t.Error("Content-Type header should be application/json")
 	}
 	
-	if entry.Body.(map[string]interface{})["model"] != "claude-3-5-sonnet-20241022" {
-		t.Error("Model in body should be claude-3-5-sonnet-20241022")
+	if entry.Body.(map[string]interface{})["model"] != "claude-sonnet-4-20250514" {
+		t.Error("Model in body should be claude-sonnet-4-20250514")
 	}
 }
 
