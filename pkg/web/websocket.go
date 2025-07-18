@@ -344,6 +344,22 @@ func (ws *WebSocketServer) handleEvent(client *websocket.Conn, event WebSocketEv
 		// Handle chat message
 		ws.handleChatMessage(client, event)
 
+	case "configure_streaming":
+		// Handle streaming configuration
+		ws.handleConfigureStreaming(client, event)
+
+	case "function_call_started":
+		// Handle function call started (client-side event - usually just log)
+		log.Printf("Function call started: %v", event.Data)
+
+	case "shell_command_started":
+		// Handle shell command started (client-side event - usually just log)
+		log.Printf("Shell command started: %v", event.Data)
+
+	case "file_operation_started":
+		// Handle file operation started (client-side event - usually just log)
+		log.Printf("File operation started: %v", event.Data)
+
 	default:
 		log.Printf("Unknown event type: %s", event.Type)
 	}
@@ -474,8 +490,13 @@ func (ws *WebSocketServer) handleChatMessage(client *websocket.Conn, event WebSo
 		var operationSummary ai.OperationSummary
 		var err error
 		
-		// EMERGENCY: Disable all streaming to fix infinite loop
-		// Set up basic debug callback only
+		// Set up streaming callback for real-time operations
+		ws.SetStreamingCallback(actualSessionID, func(eventType WebSocketEventType, data interface{}, sessionID string) {
+			// Handle streaming events from Claude client
+			ws.SendStreamingEvent(sessionID, eventType, data)
+		})
+		
+		// Set up debug callback for function calls (backward compatibility)
 		ws.claude.SetDebugCallback(func(eventType string, data interface{}) {
 			debugEvent := WebSocketEvent{
 				Type: "debug_message",
@@ -490,8 +511,30 @@ func (ws *WebSocketServer) handleChatMessage(client *websocket.Conn, event WebSo
 			ws.SendToClient(client, debugEvent)
 		})
 		
-		// Disable streaming callback entirely
-		ws.claude.SetStreamingCallback(nil)
+		// Set up enhanced streaming callback for the Claude client
+		ws.claude.SetStreamingCallback(func(eventType string, data interface{}) {
+			// Convert debug events to streaming events
+			switch eventType {
+			case "function_call_start":
+				ws.SendStreamingEvent(actualSessionID, EventFunctionCallStarted, data)
+			case "function_call_success", "function_call_complete":
+				ws.SendStreamingEvent(actualSessionID, EventFunctionCallCompleted, data)
+			case "function_call_error":
+				ws.SendStreamingEvent(actualSessionID, EventFunctionCallFailed, data)
+			case "shell_command_started":
+				ws.SendStreamingEvent(actualSessionID, EventShellCommandStarted, data)
+			case "shell_command_streaming":
+				ws.SendStreamingEvent(actualSessionID, EventShellCommandStreaming, data)
+			case "shell_command_completed":
+				ws.SendStreamingEvent(actualSessionID, EventShellCommandCompleted, data)
+			case "file_operation_started":
+				ws.SendStreamingEvent(actualSessionID, EventFileOperationStarted, data)
+			case "file_operation_streaming":
+				ws.SendStreamingEvent(actualSessionID, EventFileOperationStreaming, data)
+			case "file_operation_completed":
+				ws.SendStreamingEvent(actualSessionID, EventFileOperationCompleted, data)
+			}
+		})
 		
 		// Get conversation history
 		messages := context.GetMessages()
@@ -583,6 +626,38 @@ func (ws *WebSocketServer) handleChatMessage(client *websocket.Conn, event WebSo
 		}
 		ws.SendToClient(client, contextResponse)
 	}()
+}
+
+// handleConfigureStreaming processes streaming configuration requests
+func (ws *WebSocketServer) handleConfigureStreaming(client *websocket.Conn, event WebSocketEvent) {
+	log.Printf("Configuring streaming for session: %s", event.SessionID)
+	
+	// Extract streaming configuration
+	data, ok := event.Data.(map[string]interface{})
+	if !ok {
+		log.Printf("Invalid configure_streaming data format")
+		return
+	}
+	
+	enabled, _ := data["enabled"].(bool)
+	log.Printf("Streaming enabled: %v", enabled)
+	
+	// Update conversation context
+	if context := ws.GetConversationContext(event.SessionID); context != nil {
+		context.SetStreamingEnabled(enabled)
+	}
+	
+	// Send acknowledgment
+	response := WebSocketEvent{
+		Type: "streaming_configured",
+		Data: map[string]interface{}{
+			"enabled": enabled,
+			"sessionId": event.SessionID,
+		},
+		Timestamp: time.Now(),
+		SessionID: event.SessionID,
+	}
+	ws.SendToClient(client, response)
 }
 
 // GetClientCount returns the number of connected clients
