@@ -55,7 +55,8 @@ func NewShellManager() *ShellManager {
 // RunWithCapture executes a command and returns a handle for querying output
 func (sm *ShellManager) RunWithCapture(cmd string) (*OutputHandle, error) {
 	// Generate unique uint64 ID
-	id := atomic.AddUint64(&sm.nextID, 1)
+	id := sm.nextID
+	atomic.AddUint64(&sm.nextID, 1)
 	
 	handle := &OutputHandle{
 		ID:        id,
@@ -240,6 +241,15 @@ func (sm *ShellManager) GetStats(handleID uint64) (*Stats, error) {
 	}
 	
 	return stats, nil
+}
+
+// GetHandle retrieves a handle by ID (needed for AI integration)
+func (sm *ShellManager) GetHandle(handleID uint64) (*OutputHandle, bool) {
+	sm.mutex.RLock()
+	defer sm.mutex.RUnlock()
+	
+	handle, exists := sm.handles[handleID]
+	return handle, exists
 }
 
 // CleanupHandle removes a handle from memory
