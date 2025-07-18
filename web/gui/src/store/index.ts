@@ -14,10 +14,56 @@ import type {
   Session,
   Notification,
   DebugMessage,
-  ShellOperation
+  ShellOperation,
+  FileOperation
 } from '@/types';
 
+// Enhanced real-time context state
+interface RealTimeContext {
+  // Live operation tracking
+  activeFunctionCalls: Map<string, FunctionCall>;
+  activeShellCommands: Map<string, ShellOperation>;
+  activeFileOperations: Map<string, FileOperation>;
+  
+  // Streaming state
+  isStreaming: boolean;
+  streamingOperationId?: string;
+  streamingType?: 'function' | 'shell' | 'file';
+  
+  // Context derivation
+  contextVersion: number;
+  lastContextUpdate: Date;
+  pendingContextChanges: string[];
+  
+  // Performance metrics
+  operationMetrics: {
+    totalOperations: number;
+    averageResponseTime: number;
+    operationsPerMinute: number;
+    lastMinuteOperations: number[];
+  };
+}
+
+// Enhanced message with real-time tracking
+interface EnhancedMessage extends Message {
+  // Real-time states
+  isLive?: boolean;
+  liveOperations?: string[];
+  contextSnapshot?: Partial<ContextState>;
+  
+  // Streaming states
+  isStreaming?: boolean;
+  streamProgress?: number;
+  estimatedCompletion?: Date;
+}
+
 interface AppStore extends AppState {
+  // Enhanced Real-Time Context
+  realTimeContext: RealTimeContext;
+  
+  // Enhanced Messages
+  messages: EnhancedMessage[];
+  
   // Debug Messages
   debugMessages: DebugMessage[];
   
@@ -32,6 +78,24 @@ interface AppStore extends AppState {
   selectFunctionCall: (id?: string) => void;
   toggleTheme: () => void;
   toggleSidebar: () => void;
+  
+  // Real-Time Context Actions
+  startLiveOperation: (id: string, type: 'function' | 'shell' | 'file', operation: FunctionCall | ShellOperation | FileOperation) => void;
+  updateLiveOperation: (id: string, updates: Partial<FunctionCall | ShellOperation | FileOperation>) => void;
+  completeLiveOperation: (id: string) => void;
+  setStreamingState: (streaming: boolean, operationId?: string, type?: 'function' | 'shell' | 'file') => void;
+  updateContextVersion: () => void;
+  trackOperationMetrics: (operationDuration: number) => void;
+  
+  // Enhanced Message Actions
+  addLiveMessage: (message: Omit<EnhancedMessage, 'id'>) => void;
+  updateMessageStreaming: (id: string, streaming: boolean, progress?: number) => void;
+  addOperationToMessage: (messageId: string, operationId: string) => void;
+  
+  // Context Derivation
+  deriveContextFromState: () => Partial<ContextState>;
+  getActiveOperationsCount: () => number;
+  getLiveOperationsByType: (type: 'function' | 'shell' | 'file') => Array<FunctionCall | ShellOperation | FileOperation>;
   
   // Terminal Actions
   showTerminal: (operation?: ShellOperation) => void;
@@ -92,13 +156,30 @@ interface AppStore extends AppState {
 
 export const useAppStore = create<AppStore>()(
   subscribeWithSelector(
-    immer((set) => ({
+    immer((set, get) => ({
       // Initial UI State
       leftPaneWidth: 50,
       rightPaneWidth: 50,
       selectedFunctionCall: undefined,
       theme: 'dark',
       sidebarCollapsed: false,
+      
+      // Initial Real-Time Context
+      realTimeContext: {
+        activeFunctionCalls: new Map(),
+        activeShellCommands: new Map(),
+        activeFileOperations: new Map(),
+        isStreaming: false,
+        contextVersion: 0,
+        lastContextUpdate: new Date(),
+        pendingContextChanges: [],
+        operationMetrics: {
+          totalOperations: 0,
+          averageResponseTime: 0,
+          operationsPerMinute: 0,
+          lastMinuteOperations: [],
+        },
+      },
       
       // Initial Session State
       currentSession: undefined,
@@ -135,6 +216,203 @@ export const useAppStore = create<AppStore>()(
       currentTerminalOperation: undefined,
       allShellOperations: [],
       
+      // Real-Time Context Actions
+      startLiveOperation: (id, type, operation) => set((state) => {
+        const rtContext = state.realTimeContext;
+        
+        switch (type) {
+          case 'function':
+            rtContext.activeFunctionCalls.set(id, operation as FunctionCall);
+            break;
+          case 'shell':
+            rtContext.activeShellCommands.set(id, operation as ShellOperation);
+            break;
+          case 'file':
+            rtContext.activeFileOperations.set(id, operation as FileOperation);
+            break;
+        }
+        
+        rtContext.contextVersion++;
+        rtContext.lastContextUpdate = new Date();
+        rtContext.pendingContextChanges.push(`${type}_started:${id}`);
+      }),
+      
+      updateLiveOperation: (id, updates) => set((state) => {
+        const rtContext = state.realTimeContext;
+        
+        // Update in all possible maps
+        if (rtContext.activeFunctionCalls.has(id)) {
+          const existing = rtContext.activeFunctionCalls.get(id)!;
+          rtContext.activeFunctionCalls.set(id, { ...existing, ...updates });
+        }
+        if (rtContext.activeShellCommands.has(id)) {
+          const existing = rtContext.activeShellCommands.get(id)!;
+          rtContext.activeShellCommands.set(id, { ...existing, ...updates });
+        }
+        if (rtContext.activeFileOperations.has(id)) {
+          const existing = rtContext.activeFileOperations.get(id)!;
+          rtContext.activeFileOperations.set(id, { ...existing, ...updates });
+        }
+        
+        rtContext.contextVersion++;
+        rtContext.lastContextUpdate = new Date();
+        rtContext.pendingContextChanges.push(`operation_updated:${id}`);
+      }),
+      
+      completeLiveOperation: (id) => set((state) => {
+        const rtContext = state.realTimeContext;
+        
+        // Get operation details before removing
+        const functionOp = rtContext.activeFunctionCalls.get(id);
+        const shellOp = rtContext.activeShellCommands.get(id);
+        const fileOp = rtContext.activeFileOperations.get(id);
+        
+        const operation = functionOp || shellOp || fileOp;
+        
+        if (operation) {
+          // Track metrics - only FunctionCall and ShellOperation have duration
+          let duration = 0;
+          if ('duration' in operation && operation.duration) {
+            duration = operation.duration;
+          }
+          
+          state.realTimeContext.operationMetrics.totalOperations++;
+          
+          // Update average response time
+          const currentAvg = state.realTimeContext.operationMetrics.averageResponseTime;
+          const totalOps = state.realTimeContext.operationMetrics.totalOperations;
+          state.realTimeContext.operationMetrics.averageResponseTime = 
+            (currentAvg * (totalOps - 1) + duration) / totalOps;
+        }
+        
+        // Remove from active operations
+        rtContext.activeFunctionCalls.delete(id);
+        rtContext.activeShellCommands.delete(id);
+        rtContext.activeFileOperations.delete(id);
+        
+        rtContext.contextVersion++;
+        rtContext.lastContextUpdate = new Date();
+        rtContext.pendingContextChanges.push(`operation_completed:${id}`);
+      }),
+      
+      setStreamingState: (streaming, operationId, type) => set((state) => {
+        state.realTimeContext.isStreaming = streaming;
+        state.realTimeContext.streamingOperationId = operationId;
+        state.realTimeContext.streamingType = type;
+        
+        if (streaming) {
+          state.realTimeContext.pendingContextChanges.push(`streaming_started:${operationId || 'unknown'}`);
+        } else {
+          state.realTimeContext.pendingContextChanges.push(`streaming_ended:${operationId || 'unknown'}`);
+        }
+      }),
+      
+      updateContextVersion: () => set((state) => {
+        state.realTimeContext.contextVersion++;
+        state.realTimeContext.lastContextUpdate = new Date();
+      }),
+      
+      trackOperationMetrics: (operationDuration) => set((state) => {
+        const metrics = state.realTimeContext.operationMetrics;
+        const now = Date.now();
+        
+        // Add to last minute operations
+        metrics.lastMinuteOperations.push(now);
+        
+        // Remove operations older than 1 minute
+        const oneMinuteAgo = now - 60000;
+        metrics.lastMinuteOperations = metrics.lastMinuteOperations.filter(time => time > oneMinuteAgo);
+        
+        // Update operations per minute
+        metrics.operationsPerMinute = metrics.lastMinuteOperations.length;
+        
+        // Use the provided duration for average calculation
+        if (operationDuration > 0) {
+          const currentAvg = metrics.averageResponseTime;
+          const totalOps = metrics.totalOperations;
+          metrics.averageResponseTime = ((currentAvg * (totalOps - 1)) + operationDuration) / totalOps;
+        }
+      }),
+      
+      // Enhanced Message Actions
+      addLiveMessage: (message) => set((state) => {
+        const id = Date.now().toString();
+        const enhancedMessage: EnhancedMessage = {
+          ...message,
+          id,
+          contextSnapshot: get().deriveContextFromState(),
+        };
+        state.messages.push(enhancedMessage);
+      }),
+      
+      updateMessageStreaming: (id, streaming, progress) => set((state) => {
+        const messageIndex = state.messages.findIndex(m => m.id === id);
+        if (messageIndex !== -1) {
+          state.messages[messageIndex].isStreaming = streaming;
+          if (progress !== undefined) {
+            state.messages[messageIndex].streamProgress = progress;
+          }
+        }
+      }),
+      
+      addOperationToMessage: (messageId, operationId) => set((state) => {
+        const messageIndex = state.messages.findIndex(m => m.id === messageId);
+        if (messageIndex !== -1) {
+          const message = state.messages[messageIndex];
+          if (!message.liveOperations) {
+            message.liveOperations = [];
+          }
+          if (!message.liveOperations.includes(operationId)) {
+            message.liveOperations.push(operationId);
+          }
+          message.isLive = true;
+        }
+      }),
+      
+      // Context Derivation
+      deriveContextFromState: () => {
+        const state = get();
+        const rtContext = state.realTimeContext;
+        
+        return {
+          sessionId: state.currentSession?.id || 'current',
+          memoryEntries: Object.keys(state.protectedMemory).length,
+          knowledgeEntries: Object.keys(state.knowledgeBase).length,
+          commandHistory: state.commandExecutions.length,
+          activeHandles: rtContext.activeFunctionCalls.size + rtContext.activeShellCommands.size + rtContext.activeFileOperations.size,
+          activeFiles: rtContext.activeFileOperations.size,
+          lastActivity: rtContext.lastContextUpdate,
+          createdAt: state.currentSession?.createdAt || new Date(),
+          totalCost: state.currentSession?.totalCost || 0,
+          requestCount: rtContext.operationMetrics.totalOperations,
+          cacheStats: {
+            cacheHits: 0, // Will be updated by backend
+            cacheMisses: 0,
+            totalSavings: 0,
+            cacheEfficiency: 0,
+          },
+        };
+      },
+      
+      getActiveOperationsCount: () => {
+        const rtContext = get().realTimeContext;
+        return rtContext.activeFunctionCalls.size + rtContext.activeShellCommands.size + rtContext.activeFileOperations.size;
+      },
+      
+      getLiveOperationsByType: (type) => {
+        const rtContext = get().realTimeContext;
+        switch (type) {
+          case 'function':
+            return Array.from(rtContext.activeFunctionCalls.values());
+          case 'shell':
+            return Array.from(rtContext.activeShellCommands.values());
+          case 'file':
+            return Array.from(rtContext.activeFileOperations.values());
+          default:
+            return [];
+        }
+      },
+      
       // UI Actions
       setLeftPaneWidth: (width) => set((state) => {
         state.leftPaneWidth = width;
@@ -164,6 +442,22 @@ export const useAppStore = create<AppStore>()(
         state.messages = [];
         state.functionCalls = [];
         state.commandExecutions = [];
+        // Reset real-time context
+        state.realTimeContext = {
+          activeFunctionCalls: new Map(),
+          activeShellCommands: new Map(),
+          activeFileOperations: new Map(),
+          isStreaming: false,
+          contextVersion: 0,
+          lastContextUpdate: new Date(),
+          pendingContextChanges: [],
+          operationMetrics: {
+            totalOperations: 0,
+            averageResponseTime: 0,
+            operationsPerMinute: 0,
+            lastMinuteOperations: [],
+          },
+        };
       }),
       
       endSession: () => set((state) => {
@@ -171,6 +465,22 @@ export const useAppStore = create<AppStore>()(
         state.messages = [];
         state.functionCalls = [];
         state.commandExecutions = [];
+        // Reset real-time context
+        state.realTimeContext = {
+          activeFunctionCalls: new Map(),
+          activeShellCommands: new Map(),
+          activeFileOperations: new Map(),
+          isStreaming: false,
+          contextVersion: 0,
+          lastContextUpdate: new Date(),
+          pendingContextChanges: [],
+          operationMetrics: {
+            totalOperations: 0,
+            averageResponseTime: 0,
+            operationsPerMinute: 0,
+            lastMinuteOperations: [],
+          },
+        };
       }),
       
       // Message Actions
@@ -349,7 +659,7 @@ export const useAppStore = create<AppStore>()(
   )
 );
 
-// Selectors for common state access patterns
+// Enhanced selectors for real-time operations
 export const selectMessages = (state: AppStore) => state.messages;
 export const selectFunctionCalls = (state: AppStore) => state.functionCalls;
 export const selectSelectedFunctionCall = (state: AppStore) => 
@@ -364,4 +674,14 @@ export const selectCurrentSession = (state: AppStore) => state.currentSession;
 export const selectIsConnected = (state: AppStore) => state.connected;
 export const selectIsStreaming = (state: AppStore) => state.isStreaming;
 export const selectNotifications = (state: AppStore) => state.notifications; 
-export const selectDebugMessages = (state: AppStore) => state.debugMessages; 
+export const selectDebugMessages = (state: AppStore) => state.debugMessages;
+
+// New real-time selectors
+export const selectRealTimeContext = (state: AppStore) => state.realTimeContext;
+export const selectActiveFunctionCalls = (state: AppStore) => Array.from(state.realTimeContext.activeFunctionCalls.values());
+export const selectActiveShellCommands = (state: AppStore) => Array.from(state.realTimeContext.activeShellCommands.values());
+export const selectActiveFileOperations = (state: AppStore) => Array.from(state.realTimeContext.activeFileOperations.values());
+export const selectLiveMessages = (state: AppStore) => state.messages.filter(m => m.isLive);
+export const selectStreamingMessages = (state: AppStore) => state.messages.filter(m => m.isStreaming);
+export const selectOperationMetrics = (state: AppStore) => state.realTimeContext.operationMetrics;
+export const selectContextVersion = (state: AppStore) => state.realTimeContext.contextVersion; 

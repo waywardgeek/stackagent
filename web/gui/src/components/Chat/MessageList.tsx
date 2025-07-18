@@ -1,80 +1,45 @@
-import React from 'react';
-import { useAppStore } from '@/store';
-import { User, Bot } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
-import { ShellCommandWidget } from './ShellCommandWidget';
-import { FileOperationWidget } from './FileOperationWidget';
-import { ShellOperation, FileOperation } from '@/types';
+import React, { useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useAppStore, selectMessages } from '@/store';
+import MessageBubble from './MessageBubble';
+import LiveOperationsDisplay from './LiveOperationsDisplay';
 
-export const MessageList: React.FC = () => {
-  const { messages, showTerminal } = useAppStore();
-  
-  const handleTerminalOpen = (operation: ShellOperation) => {
-    showTerminal(operation);
-  };
+interface MessageListProps {
+  className?: string;
+}
 
-  const handleFileOpen = (operation: FileOperation) => {
-    // TODO: Implement file viewer opening
-    console.log('Opening file for operation:', operation);
-  };
-  
+const MessageList: React.FC<MessageListProps> = ({ className = '' }) => {
+  const messages = useAppStore(selectMessages);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
   return (
-    <div className="scrollable-container p-4 space-y-4">
-      {messages.map((message) => (
-        <div
-          key={message.id}
-          className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
-        >
-          <div
-            className={`max-w-[80%] rounded-lg px-4 py-2 ${
-              message.type === 'user'
-                ? 'chat-message-user'
-                : 'chat-message-assistant'
-            }`}
+    <div className={`flex-1 overflow-y-auto p-4 space-y-4 ${className}`}>
+      {/* Real-time operations display at the top */}
+      <LiveOperationsDisplay />
+      
+      <AnimatePresence mode="popLayout">
+        {messages.map((message) => (
+          <motion.div
+            key={message.id}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.3 }}
           >
-            <div className="flex items-center space-x-2 mb-1">
-              {message.type === 'user' ? (
-                <User className="w-4 h-4" />
-              ) : (
-                <Bot className="w-4 h-4" />
-              )}
-              <span className="text-sm font-medium">
-                {message.type === 'user' ? 'You' : 'StackAgent'}
-              </span>
-              <span className="text-xs opacity-75">
-                {formatDistanceToNow(new Date(message.timestamp), { addSuffix: true })}
-              </span>
-            </div>
-            <div className="text-sm whitespace-pre-wrap">
-              {message.content}
-            </div>
-            
-            {/* Interactive Operation Widgets */}
-            {message.operationSummary?.hasOperations && (
-              <div className="mt-3">
-                {message.operationSummary.shellCommands && message.operationSummary.shellCommands.length > 0 && (
-                  <ShellCommandWidget
-                    operations={message.operationSummary.shellCommands}
-                    onTerminalOpen={handleTerminalOpen}
-                  />
-                )}
-                {message.operationSummary.fileOperations && message.operationSummary.fileOperations.length > 0 && (
-                  <FileOperationWidget
-                    operations={message.operationSummary.fileOperations}
-                    onFileOpen={handleFileOpen}
-                  />
-                )}
-              </div>
-            )}
-            
-            {message.cost && (
-              <div className="text-xs opacity-75 mt-1">
-                Cost: ${message.cost.toFixed(4)} • {message.tokens} tokens
-              </div>
-            )}
-          </div>
-        </div>
-      ))}
+            <MessageBubble message={message} />
+          </motion.div>
+        ))}
+      </AnimatePresence>
+      
+      {/* Invisible div to scroll to */}
+      <div ref={messagesEndRef} />
     </div>
   );
-}; 
+};
+
+export default MessageList; 

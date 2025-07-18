@@ -45,6 +45,10 @@ export interface ShellOperation {
   duration: number;
   workingDir: string;
   timestamp: Date;
+  // Enhanced for real-time streaming
+  isLive?: boolean;
+  streamingOutput?: string;
+  progress?: number;
 }
 
 export interface FileOperation {
@@ -56,6 +60,10 @@ export interface FileOperation {
   searchResults?: string[];
   timestamp: Date;
   size?: number;
+  // Enhanced for real-time streaming
+  isLive?: boolean;
+  streamingContent?: string;
+  progress?: number;
 }
 
 export interface FunctionCall {
@@ -70,6 +78,10 @@ export interface FunctionCall {
   endTime?: Date;
   duration?: number;
   selected?: boolean;
+  // Enhanced for real-time streaming
+  isLive?: boolean;
+  streamingOutput?: string;
+  progress?: number;
 }
 
 export interface CommandExecution {
@@ -255,6 +267,13 @@ export type WebSocketEventType =
   | 'function_call_started'
   | 'function_call_completed'
   | 'function_call_failed'
+  | 'function_call_streaming'
+  | 'shell_command_started'
+  | 'shell_command_streaming'
+  | 'shell_command_completed'
+  | 'file_operation_started'
+  | 'file_operation_streaming'
+  | 'file_operation_completed'
   | 'context_updated'
   | 'command_started'
   | 'command_completed'
@@ -264,10 +283,12 @@ export type WebSocketEventType =
   | 'error_occurred'
   | 'chat_message'
   | 'ai_response'
+  | 'ai_streaming'
   | 'ai_error'
   | 'user_message'
   | 'get_context'
   | 'debug_message'
+  | 'configure_streaming'
   | 'ping'
   | 'pong';
 
@@ -278,8 +299,35 @@ export interface WebSocketEvent {
   sessionId: string;
 }
 
+// Real-time streaming data structures
+export interface StreamingData {
+  operationId: string;
+  type: 'function' | 'shell' | 'file';
+  content: string;
+  progress?: number;
+  timestamp: Date;
+}
+
+export interface LiveOperationStatus {
+  id: string;
+  type: 'function' | 'shell' | 'file';
+  status: 'starting' | 'running' | 'streaming' | 'completed' | 'failed';
+  progress?: number;
+  output?: string;
+  startTime: Date;
+  estimatedCompletion?: Date;
+}
+
+// Enhanced chat message types for real-time
+export interface LiveMessage extends Message {
+  isLive: boolean;
+  liveOperations?: string[];
+  streamingProgress?: number;
+  contextSnapshot?: Partial<ContextState>;
+}
+
 // UI View Types
-export type ActionView = 'function-call' | 'command-output' | 'context' | 'file-preview' | 'debug-io';
+export type ActionView = 'function-call' | 'command-output' | 'context' | 'file-preview' | 'debug-io' | 'live-operations';
 
 // Debug Message Types
 export interface DebugMessage {
@@ -290,4 +338,16 @@ export interface DebugMessage {
   event?: string;
   data: any;
   rawJson: string;
+}
+
+// Real-time performance metrics
+export interface PerformanceMetrics {
+  totalOperations: number;
+  averageResponseTime: number;
+  operationsPerMinute: number;
+  activeOperations: number;
+  streamingOperations: number;
+  cacheHitRate: number;
+  contextVersion: number;
+  lastUpdate: Date;
 } 

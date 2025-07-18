@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAppStore } from '@/store';
-import { MessageList } from './MessageList';
+import MessageList from './MessageList';
 import { ChatInput } from './ChatInput';
 import { FunctionCallList } from './FunctionCallList';
 import { TerminalPane } from '../Layout/TerminalPane';
