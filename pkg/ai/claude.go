@@ -1,12 +1,14 @@
 package ai
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -465,11 +467,125 @@ func (c *ClaudeClient) getAvailableTools() []Tool {
 				Required: []string{"command"},
 			},
 		},
+		{
+			Name:        "read_file",
+			Description: "Read the contents of a file. Much more efficient than using cat command for file reading.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"file_path": {
+						Type:        "string",
+						Description: "The path to the file to read",
+					},
+					"max_lines": {
+						Type:        "integer",
+						Description: "Maximum number of lines to read (optional, default: all)",
+					},
+				},
+				Required: []string{"file_path"},
+			},
+		},
+		{
+			Name:        "write_file",
+			Description: "Write content to a file, creating it if it doesn't exist. Much more efficient than using echo or tee commands.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"file_path": {
+						Type:        "string",
+						Description: "The path to the file to write",
+					},
+					"content": {
+						Type:        "string",
+						Description: "The content to write to the file",
+					},
+					"append": {
+						Type:        "boolean",
+						Description: "Whether to append to the file instead of overwriting (optional, default: false)",
+					},
+				},
+				Required: []string{"file_path", "content"},
+			},
+		},
+		{
+			Name:        "edit_file",
+			Description: "Make specific edits to a file using find and replace operations. Much more efficient than reading, editing, and writing back entire files.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"file_path": {
+						Type:        "string",
+						Description: "The path to the file to edit",
+					},
+					"find": {
+						Type:        "string",
+						Description: "The text to find and replace",
+					},
+					"replace": {
+						Type:        "string",
+						Description: "The replacement text",
+					},
+					"all_occurrences": {
+						Type:        "boolean",
+						Description: "Whether to replace all occurrences (default: false, replaces only first)",
+					},
+				},
+				Required: []string{"file_path", "find", "replace"},
+			},
+		},
+		{
+			Name:        "search_in_file",
+			Description: "Search for patterns in a file and return matching lines with context. More efficient than grep for simple searches.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"file_path": {
+						Type:        "string",
+						Description: "The path to the file to search",
+					},
+					"pattern": {
+						Type:        "string",
+						Description: "The text pattern to search for",
+					},
+					"context_lines": {
+						Type:        "integer",
+						Description: "Number of context lines to show around matches (optional, default: 2)",
+					},
+				},
+				Required: []string{"file_path", "pattern"},
+			},
+		},
+		{
+			Name:        "list_directory",
+			Description: "List directory contents with filtering options. More efficient than ls with complex filtering.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"directory_path": {
+						Type:        "string",
+						Description: "The path to the directory to list",
+					},
+					"file_extension": {
+						Type:        "string",
+						Description: "Filter by file extension (optional, e.g., '.go', '.txt')",
+					},
+					"show_hidden": {
+						Type:        "boolean",
+						Description: "Whether to show hidden files (optional, default: false)",
+					},
+					"recursive": {
+						Type:        "boolean",
+						Description: "Whether to list recursively (optional, default: false)",
+					},
+				},
+				Required: []string{"directory_path"},
+			},
+		},
 	}
 }
 
-// executeFunction executes a function call and returns the result
-func (c *ClaudeClient) executeFunction(toolUse ToolUse) (string, error) {
+// ExecuteFunction executes a function call and returns the result
+func (c *ClaudeClient) ExecuteFunction(toolUse ToolUse) (string, error) {
 	switch toolUse.Name {
 	case "run_with_capture":
 		command, ok := toolUse.Input["command"].(string)
@@ -500,9 +616,311 @@ func (c *ClaudeClient) executeFunction(toolUse ToolUse) (string, error) {
 		}
 
 		return result, nil
+
+	case "read_file":
+		filePath, ok := toolUse.Input["file_path"].(string)
+		if !ok {
+			return "", fmt.Errorf("invalid file_path parameter")
+		}
+
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			return "", fmt.Errorf("failed to read file: %w", err)
+		}
+
+		lines := strings.Split(string(content), "\n")
+		
+		// Check if max_lines is specified
+		if maxLinesVal, exists := toolUse.Input["max_lines"]; exists {
+			if maxLinesFloat, ok := maxLinesVal.(float64); ok {
+				maxLines := int(maxLinesFloat)
+				if maxLines > 0 && maxLines < len(lines) {
+					lines = lines[:maxLines]
+					return fmt.Sprintf("File: %s (showing first %d lines)\n\n%s", filePath, maxLines, strings.Join(lines, "\n")), nil
+				}
+			}
+		}
+
+		return fmt.Sprintf("File: %s (%d lines)\n\n%s", filePath, len(lines), string(content)), nil
+
+	case "write_file":
+		filePath, ok := toolUse.Input["file_path"].(string)
+		if !ok {
+			return "", fmt.Errorf("invalid file_path parameter")
+		}
+
+		content, ok := toolUse.Input["content"].(string)
+		if !ok {
+			return "", fmt.Errorf("invalid content parameter")
+		}
+
+		// Check if append mode is specified
+		append := false
+		if appendVal, exists := toolUse.Input["append"]; exists {
+			if appendBool, ok := appendVal.(bool); ok {
+				append = appendBool
+			}
+		}
+
+		var err error
+		if append {
+			file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			if err != nil {
+				return "", fmt.Errorf("failed to open file for append: %w", err)
+			}
+			defer file.Close()
+			
+			_, err = file.WriteString(content)
+			if err != nil {
+				return "", fmt.Errorf("failed to append to file: %w", err)
+			}
+			
+			return fmt.Sprintf("Successfully appended %d characters to %s", len(content), filePath), nil
+		} else {
+			err = os.WriteFile(filePath, []byte(content), 0644)
+			if err != nil {
+				return "", fmt.Errorf("failed to write file: %w", err)
+			}
+			
+			return fmt.Sprintf("Successfully wrote %d characters to %s", len(content), filePath), nil
+		}
+
+	case "edit_file":
+		filePath, ok := toolUse.Input["file_path"].(string)
+		if !ok {
+			return "", fmt.Errorf("invalid file_path parameter")
+		}
+
+		find, ok := toolUse.Input["find"].(string)
+		if !ok {
+			return "", fmt.Errorf("invalid find parameter")
+		}
+
+		replace, ok := toolUse.Input["replace"].(string)
+		if !ok {
+			return "", fmt.Errorf("invalid replace parameter")
+		}
+
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			return "", fmt.Errorf("failed to read file: %w", err)
+		}
+
+		contentStr := string(content)
+		
+		// Check if all_occurrences is specified
+		allOccurrences := false
+		if allOccVal, exists := toolUse.Input["all_occurrences"]; exists {
+			if allOccBool, ok := allOccVal.(bool); ok {
+				allOccurrences = allOccBool
+			}
+		}
+
+		var newContent string
+		var count int
+		
+		if allOccurrences {
+			newContent = strings.ReplaceAll(contentStr, find, replace)
+			count = strings.Count(contentStr, find)
+		} else {
+			newContent = strings.Replace(contentStr, find, replace, 1)
+			if strings.Contains(contentStr, find) {
+				count = 1
+			}
+		}
+
+		if count == 0 {
+			return fmt.Sprintf("No occurrences of '%s' found in %s", find, filePath), nil
+		}
+
+		err = os.WriteFile(filePath, []byte(newContent), 0644)
+		if err != nil {
+			return "", fmt.Errorf("failed to write modified file: %w", err)
+		}
+
+		return fmt.Sprintf("Successfully replaced %d occurrence(s) of '%s' with '%s' in %s", count, find, replace, filePath), nil
+
+	case "search_in_file":
+		filePath, ok := toolUse.Input["file_path"].(string)
+		if !ok {
+			return "", fmt.Errorf("invalid file_path parameter")
+		}
+
+		pattern, ok := toolUse.Input["pattern"].(string)
+		if !ok {
+			return "", fmt.Errorf("invalid pattern parameter")
+		}
+
+		file, err := os.Open(filePath)
+		if err != nil {
+			return "", fmt.Errorf("failed to open file: %w", err)
+		}
+		defer file.Close()
+
+		contextLines := 2
+		if contextVal, exists := toolUse.Input["context_lines"]; exists {
+			if contextFloat, ok := contextVal.(float64); ok {
+				contextLines = int(contextFloat)
+			}
+		}
+
+		var lines []string
+		var matches []string
+		scanner := bufio.NewScanner(file)
+		lineNum := 0
+		
+		for scanner.Scan() {
+			lineNum++
+			line := scanner.Text()
+			lines = append(lines, line)
+			
+			if strings.Contains(line, pattern) {
+				start := max(0, lineNum-contextLines-1)
+				end := min(len(lines), lineNum+contextLines)
+				
+				matchResult := fmt.Sprintf("Line %d: %s", lineNum, line)
+				if contextLines > 0 {
+					matchResult += "\nContext:"
+					for i := start; i < end; i++ {
+						if i == lineNum-1 {
+							matchResult += fmt.Sprintf("  > %d: %s", i+1, lines[i])
+						} else {
+							matchResult += fmt.Sprintf("    %d: %s", i+1, lines[i])
+						}
+						if i < end-1 {
+							matchResult += "\n"
+						}
+					}
+				}
+				matches = append(matches, matchResult)
+			}
+		}
+
+		if err := scanner.Err(); err != nil {
+			return "", fmt.Errorf("error reading file: %w", err)
+		}
+
+		if len(matches) == 0 {
+			return fmt.Sprintf("No matches found for pattern '%s' in %s", pattern, filePath), nil
+		}
+
+		return fmt.Sprintf("Found %d match(es) for pattern '%s' in %s:\n\n%s", len(matches), pattern, filePath, strings.Join(matches, "\n\n")), nil
+
+	case "list_directory":
+		dirPath, ok := toolUse.Input["directory_path"].(string)
+		if !ok {
+			return "", fmt.Errorf("invalid directory_path parameter")
+		}
+
+		// Get optional parameters
+		var fileExt string
+		if extVal, exists := toolUse.Input["file_extension"]; exists {
+			if extStr, ok := extVal.(string); ok {
+				fileExt = extStr
+			}
+		}
+
+		showHidden := false
+		if hiddenVal, exists := toolUse.Input["show_hidden"]; exists {
+			if hiddenBool, ok := hiddenVal.(bool); ok {
+				showHidden = hiddenBool
+			}
+		}
+
+		recursive := false
+		if recVal, exists := toolUse.Input["recursive"]; exists {
+			if recBool, ok := recVal.(bool); ok {
+				recursive = recBool
+			}
+		}
+
+		var files []string
+		var err error
+
+		if recursive {
+			err = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+				if err != nil {
+					return err
+				}
+
+				// Skip hidden files if not requested
+				if !showHidden && strings.HasPrefix(info.Name(), ".") {
+					if info.IsDir() {
+						return filepath.SkipDir
+					}
+					return nil
+				}
+
+				// Filter by extension if specified
+				if fileExt != "" && !strings.HasSuffix(info.Name(), fileExt) {
+					return nil
+				}
+
+				relPath, _ := filepath.Rel(dirPath, path)
+				if relPath == "." {
+					return nil
+				}
+
+				if info.IsDir() {
+					files = append(files, fmt.Sprintf("%s/", relPath))
+				} else {
+					files = append(files, relPath)
+				}
+				return nil
+			})
+		} else {
+			entries, err := os.ReadDir(dirPath)
+			if err != nil {
+				return "", fmt.Errorf("failed to read directory: %w", err)
+			}
+
+			for _, entry := range entries {
+				// Skip hidden files if not requested
+				if !showHidden && strings.HasPrefix(entry.Name(), ".") {
+					continue
+				}
+
+				// Filter by extension if specified
+				if fileExt != "" && !strings.HasSuffix(entry.Name(), fileExt) {
+					continue
+				}
+
+				if entry.IsDir() {
+					files = append(files, fmt.Sprintf("%s/", entry.Name()))
+				} else {
+					files = append(files, entry.Name())
+				}
+			}
+		}
+
+		if err != nil {
+			return "", fmt.Errorf("failed to list directory: %w", err)
+		}
+
+		if len(files) == 0 {
+			return fmt.Sprintf("No files found in %s with the specified criteria", dirPath), nil
+		}
+
+		return fmt.Sprintf("Found %d item(s) in %s:\n\n%s", len(files), dirPath, strings.Join(files, "\n")), nil
+
 	default:
 		return "", fmt.Errorf("unknown function: %s", toolUse.Name)
 	}
+}
+
+// Helper functions
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // makeRequestWithTools makes an HTTP request with function calling support
@@ -569,7 +987,7 @@ func (c *ClaudeClient) ChatWithTools(message string) (string, error) {
 			MaxTokens: 4000,
 			Messages:  messages,
 			Tools:     tools,
-			System:    "You are StackAgent, a helpful AI coding assistant with access to shell commands through the run_with_capture function. Use this function when users ask you to execute commands, check system status, or perform any tasks that require shell access. Be concise but helpful.",
+			System:    "You are StackAgent, a helpful AI coding assistant with access to powerful file manipulation and shell command tools. Available functions: run_with_capture (shell commands), read_file (read files), write_file (create/write files), edit_file (find/replace in files), search_in_file (search with context), list_directory (list files with filters). Use these functions to efficiently help with coding tasks, file operations, and system administration. Be concise but helpful.",
 		}
 
 		response, err := c.makeRequestWithTools(request)
@@ -602,7 +1020,7 @@ func (c *ClaudeClient) ChatWithTools(message string) (string, error) {
 		// Execute tools and prepare tool results
 		var toolResults []interface{}
 		for _, toolUse := range toolUses {
-			result, err := c.executeFunction(toolUse)
+			result, err := c.ExecuteFunction(toolUse)
 			if err != nil {
 				toolResults = append(toolResults, ToolResult{
 					Type:      "tool_result",
