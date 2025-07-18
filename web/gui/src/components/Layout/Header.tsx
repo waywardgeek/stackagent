@@ -38,6 +38,9 @@ export const Header: React.FC = () => {
             <p className="text-xs text-secondary-500 dark:text-secondary-400">
               AI Coding Assistant
             </p>
+            <p className="text-xs text-secondary-400 dark:text-secondary-500 italic">
+              Don't be evil
+            </p>
           </div>
         </div>
         
