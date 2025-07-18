@@ -176,14 +176,24 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
           break;
           
         case 'ai_response':
-          // Add AI response message to store
+          // Add AI response message to store with operation summary
           storeRef.current.addMessage({
             id: Date.now().toString(),
             sessionId: data.sessionId || 'current',
             type: 'assistant',
             content: data.data.message,
             timestamp: new Date(data.data.timestamp),
+            operationSummary: data.data.operationSummary,
+            cost: data.data.cost?.totalCost,
+            tokens: data.data.cost?.inputTokens + data.data.cost?.outputTokens,
           });
+          
+          // Add shell operations to the store for terminal pane
+          if (data.data.operationSummary?.shellCommands) {
+            data.data.operationSummary.shellCommands.forEach((shellOp: any) => {
+              storeRef.current.addShellOperation(shellOp);
+            });
+          }
           break;
           
         case 'ai_error':

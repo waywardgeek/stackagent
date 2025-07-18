@@ -407,6 +407,7 @@ func (ws *WebSocketServer) handleChatMessage(client *websocket.Conn, event WebSo
 	go func() {
 		var response string
 		var cost ai.TokenCost
+		var operationSummary ai.OperationSummary
 		var err error
 		
 		// Set up debug callback for function calls
@@ -453,13 +454,14 @@ func (ws *WebSocketServer) handleChatMessage(client *websocket.Conn, event WebSo
 		}
 		ws.SendToClient(client, debugEvent)
 		
-		// Convert to Claude format and send with context
-		response, cost, err = ws.claude.ChatWithToolsAndContext(messages)
-		
+		// Call Claude API with context
+		response, cost, operationSummary, err = ws.claude.ChatWithToolsAndContext(messages)
 		if err != nil {
 			log.Printf("Claude API error: %v", err)
+			
+			// Send error response to client
 			errorResponse := WebSocketEvent{
-				Type: "ai_error",
+				Type: "ai_error", 
 				Data: map[string]interface{}{
 					"error": fmt.Sprintf("Failed to get AI response: %v", err),
 				},
@@ -476,13 +478,14 @@ func (ws *WebSocketServer) handleChatMessage(client *websocket.Conn, event WebSo
 		// Add cost information to context
 		context.AddCost(cost)
 
-		// Send AI response with cost information
+		// Send AI response with cost and operation summary information
 		aiResponse := WebSocketEvent{
 			Type: "ai_response",
 			Data: map[string]interface{}{
-				"message":   response,
-				"timestamp": time.Now(),
-				"cost":      cost,
+				"message":          response,
+				"timestamp":        time.Now(),
+				"cost":            cost,
+				"operationSummary": operationSummary,
 			},
 			Timestamp: time.Now(),
 			SessionID: actualSessionID,

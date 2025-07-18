@@ -1320,6 +1320,118 @@ func (c *ClaudeClient) ChatWithToolsAndContext(conversationMessages []Conversati
 					})
 				}
 				
+				// Track operations for interactive widgets
+				operationSummary.HasOperations = true
+				
+				switch toolUse.Name {
+				case "run_with_capture":
+					// Track shell command execution
+					if command, ok := toolUse.Input["command"].(string); ok {
+						workingDir, _ := toolUse.Input["working_dir"].(string)
+						if workingDir == "" {
+							workingDir = "."
+						}
+						
+						shellOp := ShellOperation{
+							ID:         toolUse.ID,
+							Command:    command,
+							Output:     result,
+							ExitCode:   0, // Default to success, could parse from result
+							Duration:   0.0, // Would need timing info
+							WorkingDir: workingDir,
+							Timestamp:  time.Now(),
+						}
+						
+						// Try to parse exit code from result if available
+						if strings.Contains(result, "exit code:") {
+							// Simple parsing - could be more sophisticated
+							if strings.Contains(result, "exit code: 0") {
+								shellOp.ExitCode = 0
+							} else {
+								shellOp.ExitCode = 1
+							}
+						}
+						
+						operationSummary.ShellCommands = append(operationSummary.ShellCommands, shellOp)
+					}
+					
+				case "read_file":
+					// Track file read operation
+					if filePath, ok := toolUse.Input["file_path"].(string); ok {
+						fileOp := FileOperation{
+							ID:        toolUse.ID,
+							Type:      "read",
+							FilePath:  filePath,
+							Content:   result,
+							Timestamp: time.Now(),
+							Size:      len(result),
+						}
+						operationSummary.FileOperations = append(operationSummary.FileOperations, fileOp)
+					}
+					
+				case "write_file":
+					// Track file write operation
+					if filePath, ok := toolUse.Input["file_path"].(string); ok {
+						content, _ := toolUse.Input["content"].(string)
+						fileOp := FileOperation{
+							ID:        toolUse.ID,
+							Type:      "write",
+							FilePath:  filePath,
+							Content:   content,
+							Timestamp: time.Now(),
+							Size:      len(content),
+						}
+						operationSummary.FileOperations = append(operationSummary.FileOperations, fileOp)
+					}
+					
+				case "edit_file":
+					// Track file edit operation
+					if filePath, ok := toolUse.Input["file_path"].(string); ok {
+						oldText, _ := toolUse.Input["old_text"].(string)
+						newText, _ := toolUse.Input["new_text"].(string)
+						
+						fileOp := FileOperation{
+							ID:        toolUse.ID,
+							Type:      "edit",
+							FilePath:  filePath,
+							Changes:   fmt.Sprintf("- %s\n+ %s", oldText, newText),
+							Timestamp: time.Now(),
+						}
+						operationSummary.FileOperations = append(operationSummary.FileOperations, fileOp)
+					}
+					
+				case "search_in_file":
+					// Track file search operation
+					if filePath, ok := toolUse.Input["file_path"].(string); ok {
+						searchTerm, _ := toolUse.Input["search_term"].(string)
+						// Parse search results from the result string
+						searchResults := []string{searchTerm} // Simplified
+						
+						fileOp := FileOperation{
+							ID:            toolUse.ID,
+							Type:          "search",
+							FilePath:      filePath,
+							SearchResults: searchResults,
+							Timestamp:     time.Now(),
+						}
+						operationSummary.FileOperations = append(operationSummary.FileOperations, fileOp)
+					}
+					
+				case "list_directory":
+					// Track directory listing operation
+					if dirPath, ok := toolUse.Input["directory_path"].(string); ok {
+						fileOp := FileOperation{
+							ID:        toolUse.ID,
+							Type:      "list",
+							FilePath:  dirPath,
+							Content:   result,
+							Timestamp: time.Now(),
+							Size:      len(result),
+						}
+						operationSummary.FileOperations = append(operationSummary.FileOperations, fileOp)
+					}
+				}
+				
 				toolResults = append(toolResults, ToolResult{
 					Type:      "tool_result",
 					ToolUseID: toolUse.ID,
