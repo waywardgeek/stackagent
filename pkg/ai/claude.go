@@ -19,6 +19,8 @@ type ClaudeClient struct {
 	baseURL    string
 	httpClient *http.Client
 	model      string
+	debugFile  *os.File
+	debugEnabled bool
 }
 
 // Claude API request/response structures
@@ -60,6 +62,18 @@ type ClaudeErrorResponse struct {
 	Error ClaudeError `json:"error"`
 }
 
+// Debug log entry structure
+type DebugLogEntry struct {
+	Timestamp string      `json:"timestamp"`
+	Type      string      `json:"type"` // "request" or "response"
+	Method    string      `json:"method"`
+	URL       string      `json:"url"`
+	Headers   map[string]string `json:"headers,omitempty"`
+	Body      interface{} `json:"body,omitempty"`
+	StatusCode int        `json:"status_code,omitempty"`
+	Error     string      `json:"error,omitempty"`
+}
+
 // AI analysis results
 type CommandAnalysis struct {
 	Summary     string   `json:"summary"`
@@ -84,7 +98,63 @@ func NewClaudeClient() (*ClaudeClient, error) {
 			Timeout: 30 * time.Second,
 		},
 		model: "claude-3-5-sonnet-20241022", // Latest Claude 3.5 Sonnet
+		debugEnabled: false,
 	}, nil
+}
+
+// EnableDebugLogging enables logging of all API calls to a file
+func (c *ClaudeClient) EnableDebugLogging(filename string) error {
+	if c.debugFile != nil {
+		c.debugFile.Close()
+	}
+
+	file, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open debug file: %w", err)
+	}
+
+	c.debugFile = file
+	c.debugEnabled = true
+
+	// Write initial header
+	header := DebugLogEntry{
+		Timestamp: time.Now().Format(time.RFC3339),
+		Type:      "session_start",
+		Method:    "DEBUG",
+		URL:       "StackAgent Debug Session Started",
+	}
+	
+	c.writeDebugEntry(header)
+	return nil
+}
+
+// DisableDebugLogging disables debug logging and closes the file
+func (c *ClaudeClient) DisableDebugLogging() error {
+	c.debugEnabled = false
+	if c.debugFile != nil {
+		err := c.debugFile.Close()
+		c.debugFile = nil
+		return err
+	}
+	return nil
+}
+
+// writeDebugEntry writes a debug entry to the log file
+func (c *ClaudeClient) writeDebugEntry(entry DebugLogEntry) {
+	if !c.debugEnabled || c.debugFile == nil {
+		return
+	}
+
+	jsonData, err := json.MarshalIndent(entry, "", "  ")
+	if err != nil {
+		return
+	}
+
+	// Write with separator for readability
+	c.debugFile.WriteString("--- DEBUG ENTRY ---\n")
+	c.debugFile.Write(jsonData)
+	c.debugFile.WriteString("\n\n")
+	c.debugFile.Sync() // Ensure data is written immediately
 }
 
 // SetModel allows switching between Claude models
@@ -239,6 +309,23 @@ func (c *ClaudeClient) makeAPICall(system, user string) (*ClaudeResponse, error)
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	// Log request if debug enabled
+	if c.debugEnabled {
+		debugEntry := DebugLogEntry{
+			Timestamp: time.Now().Format(time.RFC3339),
+			Type:      "request",
+			Method:    "POST",
+			URL:       c.baseURL,
+			Headers: map[string]string{
+				"Content-Type":      "application/json",
+				"anthropic-version": "2023-06-01",
+				"x-api-key":         "[REDACTED]", // Don't log actual API key
+			},
+			Body: request,
+		}
+		c.writeDebugEntry(debugEntry)
+	}
+
 	req, err := http.NewRequest("POST", c.baseURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -250,6 +337,17 @@ func (c *ClaudeClient) makeAPICall(system, user string) (*ClaudeResponse, error)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		// Log error if debug enabled
+		if c.debugEnabled {
+			debugEntry := DebugLogEntry{
+				Timestamp: time.Now().Format(time.RFC3339),
+				Type:      "response",
+				Method:    "POST",
+				URL:       c.baseURL,
+				Error:     err.Error(),
+			}
+			c.writeDebugEntry(debugEntry)
+		}
 		return nil, fmt.Errorf("HTTP request failed: %w", err)
 	}
 	defer resp.Body.Close()
@@ -257,6 +355,22 @@ func (c *ClaudeClient) makeAPICall(system, user string) (*ClaudeResponse, error)
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Log response if debug enabled
+	if c.debugEnabled {
+		var responseBody interface{}
+		json.Unmarshal(body, &responseBody)
+		
+		debugEntry := DebugLogEntry{
+			Timestamp:  time.Now().Format(time.RFC3339),
+			Type:       "response",
+			Method:     "POST",
+			URL:        c.baseURL,
+			StatusCode: resp.StatusCode,
+			Body:       responseBody,
+		}
+		c.writeDebugEntry(debugEntry)
 	}
 
 	if resp.StatusCode != http.StatusOK {

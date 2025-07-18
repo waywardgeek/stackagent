@@ -251,6 +251,94 @@ func TestClaudeRequestStructure(t *testing.T) {
 	}
 }
 
+func TestDebugLogging(t *testing.T) {
+	os.Setenv("ANTHROPIC_API_KEY", "test-key")
+	defer os.Unsetenv("ANTHROPIC_API_KEY")
+	
+	client, err := NewClaudeClient()
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+	
+	// Test enabling debug logging
+	debugFile := "test_debug.log"
+	defer os.Remove(debugFile) // Clean up after test
+	
+	err = client.EnableDebugLogging(debugFile)
+	if err != nil {
+		t.Fatalf("Failed to enable debug logging: %v", err)
+	}
+	
+	// Verify debug is enabled
+	if !client.debugEnabled {
+		t.Error("Debug logging should be enabled")
+	}
+	
+	if client.debugFile == nil {
+		t.Error("Debug file should be set")
+	}
+	
+	// Test disabling debug logging
+	err = client.DisableDebugLogging()
+	if err != nil {
+		t.Fatalf("Failed to disable debug logging: %v", err)
+	}
+	
+	// Verify debug is disabled
+	if client.debugEnabled {
+		t.Error("Debug logging should be disabled")
+	}
+	
+	if client.debugFile != nil {
+		t.Error("Debug file should be nil after disabling")
+	}
+	
+	// Verify debug file was created and has content
+	if _, err := os.Stat(debugFile); os.IsNotExist(err) {
+		t.Error("Debug file should exist after logging")
+	}
+}
+
+func TestDebugLogEntry(t *testing.T) {
+	entry := DebugLogEntry{
+		Timestamp:  "2024-01-01T00:00:00Z",
+		Type:       "request",
+		Method:     "POST",
+		URL:        "https://api.anthropic.com/v1/messages",
+		StatusCode: 200,
+		Headers: map[string]string{
+			"Content-Type": "application/json",
+		},
+		Body: map[string]interface{}{
+			"model": "claude-3-5-sonnet-20241022",
+		},
+	}
+	
+	if entry.Timestamp == "" {
+		t.Error("Timestamp should be set")
+	}
+	
+	if entry.Type != "request" {
+		t.Error("Type should be 'request'")
+	}
+	
+	if entry.Method != "POST" {
+		t.Error("Method should be 'POST'")
+	}
+	
+	if entry.StatusCode != 200 {
+		t.Error("StatusCode should be 200")
+	}
+	
+	if entry.Headers["Content-Type"] != "application/json" {
+		t.Error("Content-Type header should be application/json")
+	}
+	
+	if entry.Body.(map[string]interface{})["model"] != "claude-3-5-sonnet-20241022" {
+		t.Error("Model in body should be claude-3-5-sonnet-20241022")
+	}
+}
+
 func TestCommandAnalysisStructure(t *testing.T) {
 	analysis := CommandAnalysis{
 		Summary:     "Test summary",
