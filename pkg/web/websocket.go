@@ -511,30 +511,11 @@ func (ws *WebSocketServer) handleChatMessage(client *websocket.Conn, event WebSo
 			ws.SendToClient(client, debugEvent)
 		})
 		
-		// Set up enhanced streaming callback for the Claude client
-		ws.claude.SetStreamingCallback(func(eventType string, data interface{}) {
-			// Convert debug events to streaming events
-			switch eventType {
-			case "function_call_start":
-				ws.SendStreamingEvent(actualSessionID, EventFunctionCallStarted, data)
-			case "function_call_success", "function_call_complete":
-				ws.SendStreamingEvent(actualSessionID, EventFunctionCallCompleted, data)
-			case "function_call_error":
-				ws.SendStreamingEvent(actualSessionID, EventFunctionCallFailed, data)
-			case "shell_command_started":
-				ws.SendStreamingEvent(actualSessionID, EventShellCommandStarted, data)
-			case "shell_command_streaming":
-				ws.SendStreamingEvent(actualSessionID, EventShellCommandStreaming, data)
-			case "shell_command_completed":
-				ws.SendStreamingEvent(actualSessionID, EventShellCommandCompleted, data)
-			case "file_operation_started":
-				ws.SendStreamingEvent(actualSessionID, EventFileOperationStarted, data)
-			case "file_operation_streaming":
-				ws.SendStreamingEvent(actualSessionID, EventFileOperationStreaming, data)
-			case "file_operation_completed":
-				ws.SendStreamingEvent(actualSessionID, EventFileOperationCompleted, data)
-			}
-		})
+		// TEMPORARY: Disable streaming callback to prevent infinite loop
+		// Keep WebSocket handlers but disable Claude client streaming
+		ws.claude.SetStreamingCallback(nil)
+		
+		// TODO: Debug streaming events step by step to find root cause of infinite loop
 		
 		// Get conversation history
 		messages := context.GetMessages()
