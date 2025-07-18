@@ -24,11 +24,12 @@ actual usage.
 
 1. [System Architecture Overview](#1-system-architecture-overview)
 2. [Core Innovations](#2-core-innovations)
-3. [Security Architecture](#3-security-architecture)
-4. [Implementation Roadmap](#4-implementation-roadmap)
-5. [Technical Implementation](#5-technical-implementation)
-6. [Technology Stack](#6-technology-stack)
-7. [Deployment Architecture](#7-deployment-architecture)
+3. [User Interface Design](#3-user-interface-design)
+4. [Security Architecture](#4-security-architecture)
+5. [Implementation Roadmap](#5-implementation-roadmap)
+6. [Technical Implementation](#6-technical-implementation)
+7. [Technology Stack](#7-technology-stack)
+8. [Deployment Architecture](#8-deployment-architecture)
 
 ## 1. System Architecture Overview
 
@@ -256,9 +257,141 @@ agent.UsePreset("exploration")   // 150k tokens, $4.50/query
 agent.UsePreset("cost-conscious") // 50k tokens, $1.50/query
 ```
 
-## 3. Security Architecture
+## 3. User Interface Design
 
-### 3.1 Privacy-First Design
+### 3.1 GUI Philosophy: Transparency and Control
+
+StackAgent's GUI is designed around a core principle: **make AI actions transparent and give users full control**. The interface must clearly show what the AI is doing, why it's doing it, and allow users to understand and intervene at any point.
+
+**Design Principles:**
+- **Radical Transparency**: Every AI action is visible and explainable
+- **User Control**: Users can inspect, modify, or stop AI actions at any time
+- **Context Awareness**: Always show current state, branch, and session info
+- **Efficiency**: Minimize cognitive load while maximizing information
+
+### 3.2 Dual-Pane Architecture
+
+The GUI uses a **resizable dual-pane layout** with a draggable vertical divider:
+
+#### Left Pane: Conversation & Control
+- **Chat Window**: Scrollable conversation history with AI
+- **Text Entry**: Input field for user prompts and commands
+- **Session Info**: Current AI cost, model selection, context status
+- **Function Widgets**: Interactive elements for each AI function call
+
+#### Right Pane: Action Details
+- **Function Viewer**: Shows details of the most recent or selected function call
+- **Real-time Updates**: Live output from running commands
+- **Context Browser**: View current memory, workspace state, Git status
+- **File Preview**: Display files being modified or created
+
+### 3.3 Enhanced Features
+
+**Chat Experience:**
+- **Syntax Highlighting**: Code snippets and file contents properly formatted
+- **Function Call Indicators**: Status badges (running, completed, failed, pending)
+- **Searchable History**: Find previous conversations and commands
+- **Export/Import**: Save sessions, share contexts with team
+
+**Context Visualization:**
+- **Branch Indicator**: Always show current Git branch and context
+- **Memory Dashboard**: View protected memory and knowledge base
+- **Session Timeline**: Track commands and AI decisions over time
+- **Cost Tracking**: Real-time API usage and cost monitoring
+
+**Interaction Enhancements:**
+- **Keyboard Shortcuts**: Power user navigation and commands
+- **Dark/Light Themes**: User preference and eye strain reduction
+- **Responsive Design**: Works on different screen sizes
+- **Real-time Streaming**: Live AI responses and command output
+
+### 3.4 Function Call Integration
+
+**Interactive Function Widgets:**
+- **Clickable Status**: Click any function call to view details in right pane
+- **Progress Indicators**: Show running commands with progress bars
+- **Error Handling**: Clear error messages and retry options
+- **Output Preview**: Inline preview of small outputs, full view in right pane
+
+**Right Pane Function Details:**
+- **Command Output**: Full terminal output with syntax highlighting
+- **File Diffs**: Show code changes with before/after comparison
+- **Context Changes**: Display updates to memory, workspace, or Git state
+- **Performance Metrics**: Execution time, tokens used, cost incurred
+
+### 3.5 Advanced UI Features
+
+**Workspace Integration:**
+- **File Tree**: Navigate project files and see AI modifications
+- **Git Integration**: Visual branch switching, commit history, context restoration
+- **Multi-tab Support**: Handle multiple conversations or projects
+- **Split Views**: Compare different AI responses or function results
+
+**Productivity Features:**
+- **Command Palette**: Quick access to all functions and settings
+- **Pinned Results**: Keep important function results visible
+- **Automation Scripts**: Save and reuse common AI workflows
+- **Collaboration Tools**: Share contexts and sessions with team members
+
+### 3.6 Technical Implementation
+
+**Framework Considerations:**
+- **Web-based**: Cross-platform compatibility, easy deployment
+- **Real-time**: WebSocket connections for live updates
+- **Responsive**: CSS Grid/Flexbox for flexible layout
+- **Accessible**: ARIA labels, keyboard navigation, screen reader support
+
+**Component Architecture:**
+```
+GUI/
+├── ChatPane/
+│   ├── ConversationView
+│   ├── InputField
+│   ├── SessionInfo
+│   └── FunctionWidgets
+├── ActionPane/
+│   ├── FunctionViewer
+│   ├── ContextBrowser
+│   ├── FilePreview
+│   └── OutputDisplay
+├── Common/
+│   ├── Layout (resizable panes)
+│   ├── Theming
+│   └── KeyboardShortcuts
+└── Services/
+    ├── WebSocket (real-time updates)
+    ├── StateManagement
+    └── API Integration
+```
+
+**Technology Stack:**
+- **Frontend**: React/Vue.js + TypeScript
+- **Styling**: TailwindCSS for rapid development
+- **Real-time**: WebSocket + Server-Sent Events
+- **State**: Redux/Zustand for complex state management
+- **Build**: Vite for fast development and builds
+
+### 3.7 User Experience Flow
+
+**Typical Session:**
+1. **Startup**: GUI loads, shows context status, Git branch
+2. **Chat**: User types request, AI responds with function calls
+3. **Transparency**: Each function call shows as widget in chat
+4. **Details**: User clicks function widget → details appear in right pane
+5. **Control**: User can stop, modify, or retry any action
+6. **Context**: All actions update persistent memory and workspace
+
+**Power User Features:**
+- **Keyboard Navigation**: Tab through function calls, use shortcuts
+- **Batch Operations**: Select multiple function calls, apply actions
+- **Session Management**: Save, load, and switch between contexts
+- **Advanced Filtering**: Search across all sessions and contexts
+
+This GUI design ensures that StackAgent is not just powerful, but also **transparent, controllable, and user-friendly** - making AI assistance accessible to both novice and expert developers.
+
+## 4. Security Architecture
+
+### 4.1 Privacy-First Design
 
 **Key Innovation**: Hardware attestation protects user's trade secrets FROM StackAgent operators.
 
@@ -299,7 +432,7 @@ agent.UsePreset("cost-conscious") // 50k tokens, $1.50/query
 - Signals never leave enterprise network
 - Same security guarantees as cloud
 
-## 4. Implementation Roadmap
+## 5. Implementation Roadmap
 
 ### Phase 1: Core MVP with Context Innovation (2-3 months)
 
@@ -358,9 +491,9 @@ agent.UsePreset("cost-conscious") // 50k tokens, $1.50/query
 - [ ] Performance optimizations
 - [ ] Plugin system for extensions
 
-## 5. Technical Implementation
+## 6. Technical Implementation
 
-### 5.1 Context-Aware Command Execution
+### 6.1 Context-Aware Command Execution
 
 ```go
 type CommandCapture interface {
@@ -498,9 +631,9 @@ func (co *CacheOptimizer) CompressRecent() []Token {
 }
 ```
 
-## 6. Technology Stack
+## 7. Technology Stack
 
-### 6.1 Recommended Architecture: Wails (Go + Web Frontend)
+### 7.1 Recommended Architecture: Wails (Go + Web Frontend)
 
 **Decision**: Lightweight desktop app with Go backend and modern web UI.
 
@@ -534,9 +667,9 @@ deployment:
 4. **Go Throughout** - One language for all backend logic
 5. **Proven Tools** - PTY, grep, sed over complex abstractions
 
-## 7. Deployment Architecture
+## 8. Deployment Architecture
 
-### 7.1 StackAgent Cloud (Default)
+### 8.1 StackAgent Cloud (Default)
 
 ```
 Users Worldwide → Encrypted Signals → StackAgent CVMs
@@ -545,7 +678,7 @@ Users Worldwide → Encrypted Signals → StackAgent CVMs
                                       └─ Zero Operator Access
 ```
 
-### 7.2 Enterprise On-Premise
+### 8.2 Enterprise On-Premise
 
 ```
 Enterprise Users → Encrypted Signals → On-Prem CVMs

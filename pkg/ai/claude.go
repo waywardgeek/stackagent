@@ -251,6 +251,18 @@ Keep the response concise but informative.`,
 	return analysis, nil
 }
 
+// Chat sends a simple conversational message to Claude
+func (c *ClaudeClient) Chat(message string) (string, error) {
+	systemPrompt := `You are StackAgent, a helpful AI coding assistant. You help developers with their code, answer questions, and can execute commands when needed. Be concise but helpful.`
+	
+	response, err := c.makeAPICall(systemPrompt, message)
+	if err != nil {
+		return "", err
+	}
+
+	return response.Content[0].Text, nil
+}
+
 // AskAboutOutput asks Claude a specific question about command output
 func (c *ClaudeClient) AskAboutOutput(sm *shell.ShellManager, handleID uint64, question string) (string, error) {
 	// Get command output
