@@ -1186,21 +1186,43 @@ func (c *ClaudeClient) ChatWithTools(message string) (string, TokenCost, error) 
 }
 
 // ChatWithToolsAndContext sends a conversation with context and function calling support
-func (c *ClaudeClient) ChatWithToolsAndContext(conversationMessages []ConversationMessage) (string, TokenCost, error) {
+func (c *ClaudeClient) ChatWithToolsAndContext(conversationMessages []ConversationMessage) (string, TokenCost, OperationSummary, error) {
 	tools := c.getAvailableTools()
+	
+	// Initialize operation summary tracking
+	operationSummary := OperationSummary{
+		ShellCommands:  []ShellOperation{},
+		FileOperations: []FileOperation{},
+		HasOperations:  false,
+	}
 	
 	// Convert conversation messages to Claude format
 	messages := make([]ClaudeMessage, 0, len(conversationMessages))
-	for _, msg := range conversationMessages {
-		messages = append(messages, ClaudeMessage{
+	for i, msg := range conversationMessages {
+		claudeMsg := ClaudeMessage{
 			Role:    msg.Role,
 			Content: msg.Content,
-		})
+		}
+		
+		// Apply conversation caching to the second-to-last message (excludes current user message)
+		// This caches all previous conversation history including file content
+		if i == len(conversationMessages)-2 && len(conversationMessages) > 1 {
+			// Convert text content to content blocks with cache_control
+			claudeMsg.Content = []ContentBlock{
+				{
+					Type:         "text",
+					Text:         msg.Content, // Remove type assertion - Content is already string
+					CacheControl: &CacheControl{Type: "ephemeral"},
+				},
+			}
+		}
+		
+		messages = append(messages, claudeMsg)
 	}
 
 	// If no messages, return error
 	if len(messages) == 0 {
-		return "", TokenCost{}, fmt.Errorf("no messages provided")
+		return "", TokenCost{}, operationSummary, fmt.Errorf("no messages provided")
 	}
 
 	totalCost := TokenCost{}
@@ -1225,7 +1247,7 @@ func (c *ClaudeClient) ChatWithToolsAndContext(conversationMessages []Conversati
 
 		response, err := c.makeRequestWithTools(request)
 		if err != nil {
-			return "", TokenCost{}, err
+			return "", TokenCost{}, operationSummary, err
 		}
 
 		// Calculate cost for the current turn
@@ -1255,7 +1277,7 @@ func (c *ClaudeClient) ChatWithToolsAndContext(conversationMessages []Conversati
 
 		if len(toolUses) == 0 {
 			// No tools to execute, return the text response
-			return textResponse, totalCost, nil
+			return textResponse, totalCost, operationSummary, nil
 		}
 
 		// Execute tools and prepare tool results
@@ -1312,7 +1334,8 @@ func (c *ClaudeClient) ChatWithToolsAndContext(conversationMessages []Conversati
 			Content: response.Content,
 		})
 
-		// Add tool results to the conversation
+		// Add tool results to the conversation with cache control
+		// This caches tool results (including file content) for subsequent requests
 		messages = append(messages, ClaudeMessage{
 			Role:    "user",
 			Content: toolResults,
@@ -1327,6 +1350,34 @@ type ConversationMessage struct {
 	Role      string    `json:"role"`
 	Content   string    `json:"content"`
 	Timestamp time.Time `json:"timestamp"`
+}
+
+// Operation summary types for interactive widgets
+type OperationSummary struct {
+	ShellCommands   []ShellOperation `json:"shellCommands,omitempty"`
+	FileOperations  []FileOperation  `json:"fileOperations,omitempty"`
+	HasOperations   bool             `json:"hasOperations"`
+}
+
+type ShellOperation struct {
+	ID        string    `json:"id"`
+	Command   string    `json:"command"`
+	Output    string    `json:"output"`
+	ExitCode  int       `json:"exitCode"`
+	Duration  float64   `json:"duration"`
+	WorkingDir string   `json:"workingDir"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+type FileOperation struct {
+	ID           string    `json:"id"`
+	Type         string    `json:"type"` // "read", "write", "edit", "search", "list"
+	FilePath     string    `json:"filePath"`
+	Content      string    `json:"content,omitempty"`
+	Changes      string    `json:"changes,omitempty"`
+	SearchResults []string `json:"searchResults,omitempty"`
+	Timestamp    time.Time `json:"timestamp"`
+	Size         int       `json:"size,omitempty"`
 }
 
 // Helper functions for parsing Claude's response

@@ -26,6 +26,36 @@ export interface Message {
   functionCalls?: FunctionCall[];
   tokens?: number;
   cost?: number;
+  // New fields for interactive widgets
+  operationSummary?: OperationSummary;
+}
+
+// New type for operation summaries in chat
+export interface OperationSummary {
+  shellCommands?: ShellOperation[];
+  fileOperations?: FileOperation[];
+  hasOperations: boolean;
+}
+
+export interface ShellOperation {
+  id: string;
+  command: string;
+  output: string;
+  exitCode: number;
+  duration: number;
+  workingDir: string;
+  timestamp: Date;
+}
+
+export interface FileOperation {
+  id: string;
+  type: 'read' | 'write' | 'edit' | 'search' | 'list';
+  filePath: string;
+  content?: string;
+  changes?: string; // For edits, this would be the diff
+  searchResults?: string[];
+  timestamp: Date;
+  size?: number;
 }
 
 export interface FunctionCall {
@@ -151,6 +181,11 @@ export interface AppState {
   // Commands State
   commandExecutions: CommandExecution[];
   activeCommands: number;
+  
+  // Terminal State
+  isTerminalVisible: boolean;
+  currentTerminalOperation?: ShellOperation;
+  allShellOperations: ShellOperation[];
 }
 
 export interface ApiResponse<T = any> {

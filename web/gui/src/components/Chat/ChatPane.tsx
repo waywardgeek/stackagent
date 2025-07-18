@@ -3,6 +3,7 @@ import { useAppStore } from '@/store';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { FunctionCallList } from './FunctionCallList';
+import { TerminalPane } from '../Layout/TerminalPane';
 import type { WebSocketEventType } from '@/types';
 
 interface ChatPaneProps {
@@ -10,7 +11,14 @@ interface ChatPaneProps {
 }
 
 export const ChatPane: React.FC<ChatPaneProps> = ({ sendMessage }) => {
-  const { messages, functionCalls } = useAppStore();
+  const { 
+    messages, 
+    functionCalls, 
+    isTerminalVisible,
+    currentTerminalOperation,
+    allShellOperations,
+    hideTerminal 
+  } = useAppStore();
   
   return (
     <div className="flex flex-col h-full">
@@ -66,6 +74,14 @@ export const ChatPane: React.FC<ChatPaneProps> = ({ sendMessage }) => {
       <div className="border-t border-secondary-200 dark:border-secondary-700">
         <ChatInput sendMessage={sendMessage} />
       </div>
+      
+      {/* Terminal Pane */}
+      <TerminalPane
+        isVisible={isTerminalVisible}
+        onClose={hideTerminal}
+        currentOperation={currentTerminalOperation}
+        operations={allShellOperations}
+      />
     </div>
   );
 }; 

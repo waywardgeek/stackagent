@@ -2,9 +2,21 @@ import React from 'react';
 import { useAppStore } from '@/store';
 import { User, Bot } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import { ShellCommandWidget } from './ShellCommandWidget';
+import { FileOperationWidget } from './FileOperationWidget';
+import { ShellOperation, FileOperation } from '@/types';
 
 export const MessageList: React.FC = () => {
-  const { messages } = useAppStore();
+  const { messages, showTerminal } = useAppStore();
+  
+  const handleTerminalOpen = (operation: ShellOperation) => {
+    showTerminal(operation);
+  };
+
+  const handleFileOpen = (operation: FileOperation) => {
+    // TODO: Implement file viewer opening
+    console.log('Opening file for operation:', operation);
+  };
   
   return (
     <div className="scrollable-container p-4 space-y-4">
@@ -36,6 +48,25 @@ export const MessageList: React.FC = () => {
             <div className="text-sm whitespace-pre-wrap">
               {message.content}
             </div>
+            
+            {/* Interactive Operation Widgets */}
+            {message.operationSummary?.hasOperations && (
+              <div className="mt-3">
+                {message.operationSummary.shellCommands && message.operationSummary.shellCommands.length > 0 && (
+                  <ShellCommandWidget
+                    operations={message.operationSummary.shellCommands}
+                    onTerminalOpen={handleTerminalOpen}
+                  />
+                )}
+                {message.operationSummary.fileOperations && message.operationSummary.fileOperations.length > 0 && (
+                  <FileOperationWidget
+                    operations={message.operationSummary.fileOperations}
+                    onFileOpen={handleFileOpen}
+                  />
+                )}
+              </div>
+            )}
+            
             {message.cost && (
               <div className="text-xs opacity-75 mt-1">
                 Cost: ${message.cost.toFixed(4)} • {message.tokens} tokens

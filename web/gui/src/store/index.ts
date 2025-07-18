@@ -13,12 +13,18 @@ import type {
   AIModel,
   Session,
   Notification,
-  DebugMessage
+  DebugMessage,
+  ShellOperation
 } from '@/types';
 
 interface AppStore extends AppState {
   // Debug Messages
   debugMessages: DebugMessage[];
+  
+  // Terminal Pane State
+  isTerminalVisible: boolean;
+  currentTerminalOperation?: ShellOperation;
+  allShellOperations: ShellOperation[];
   
   // UI Actions
   setLeftPaneWidth: (width: number) => void;
@@ -26,6 +32,11 @@ interface AppStore extends AppState {
   selectFunctionCall: (id?: string) => void;
   toggleTheme: () => void;
   toggleSidebar: () => void;
+  
+  // Terminal Actions
+  showTerminal: (operation?: ShellOperation) => void;
+  hideTerminal: () => void;
+  addShellOperation: (operation: ShellOperation) => void;
   
   // Session Actions
   startSession: (session: Session) => void;
@@ -118,6 +129,11 @@ export const useAppStore = create<AppStore>()(
       
       // Debug Messages
       debugMessages: [],
+      
+      // Terminal Pane State
+      isTerminalVisible: false,
+      currentTerminalOperation: undefined,
+      allShellOperations: [],
       
       // UI Actions
       setLeftPaneWidth: (width) => set((state) => {
@@ -311,6 +327,23 @@ export const useAppStore = create<AppStore>()(
       
       clearNotifications: () => set((state) => {
         state.notifications = [];
+      }),
+      
+      // Terminal Actions
+      showTerminal: (operation) => set((state) => {
+        state.isTerminalVisible = true;
+        if (operation) {
+          state.currentTerminalOperation = operation;
+        }
+      }),
+      
+      hideTerminal: () => set((state) => {
+        state.isTerminalVisible = false;
+        state.currentTerminalOperation = undefined;
+      }),
+      
+      addShellOperation: (operation) => set((state) => {
+        state.allShellOperations.push(operation);
       }),
     }))
   )
