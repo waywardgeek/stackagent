@@ -674,6 +674,31 @@ func (ws *WebSocketServer) RemoveStreamingCallback(sessionID string) {
 	delete(ws.streamingCallbacks, sessionID)
 }
 
+// Shutdown gracefully closes all WebSocket connections and cleans up resources
+func (ws *WebSocketServer) Shutdown() {
+	ws.mutex.Lock()
+	defer ws.mutex.Unlock()
+	
+	log.Printf("🧹 Shutting down WebSocket server with %d active connections", len(ws.clients))
+	
+	// Close all active WebSocket connections
+	for conn, sessionID := range ws.clients {
+		log.Printf("🔌 Closing connection for session: %s", sessionID)
+		conn.Close()
+	}
+	
+	// Clear all maps
+	ws.clients = make(map[*websocket.Conn]string)
+	ws.conversations = make(map[string]*ConversationContext)
+	
+	// Clean up streaming callbacks
+	ws.streamingMutex.Lock()
+	ws.streamingCallbacks = make(map[string]StreamingCallback)
+	ws.streamingMutex.Unlock()
+	
+	log.Println("✅ WebSocket server shutdown complete")
+}
+
 // SendStreamingEvent sends a streaming event to the client
 func (ws *WebSocketServer) SendStreamingEvent(sessionID string, eventType WebSocketEventType, data interface{}) {
 	// Find the client connection for this session

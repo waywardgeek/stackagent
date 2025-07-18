@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
+	"time"
 
 	"stackagent/pkg/web"
 )
@@ -110,10 +114,19 @@ func main() {
 		w.Write([]byte(response))
 	})
 	
-	// Start HTTP server
+	// Start HTTP server with graceful shutdown
 	port := "8080"
 	if envPort := os.Getenv("PORT"); envPort != "" {
 		port = envPort
+	}
+	
+	// Create HTTP server with timeouts
+	server := &http.Server{
+		Addr:         ":" + port,
+		Handler:      mux,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 	
 	log.Printf("🚀 StackAgent Server starting on port %s", port)
@@ -122,7 +135,35 @@ func main() {
 	log.Printf("🔧 API health check: http://localhost:%s/api/health", port)
 	log.Printf("⚖️  Core principle: Don't be evil")
 	
-	if err := http.ListenAndServe(":"+port, mux); err != nil {
-		log.Fatal("Server failed to start:", err)
+	// Start server in a goroutine
+	go func() {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatal("Server failed to start:", err)
+		}
+	}()
+	
+	// Set up signal handling for graceful shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	
+	// Wait for shutdown signal
+	<-quit
+	log.Println("🛑 Shutting down server...")
+	
+	// Create a context with timeout for graceful shutdown
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	
+	// Attempt graceful shutdown
+	if err := server.Shutdown(ctx); err != nil {
+		log.Printf("❌ Server forced to shutdown: %v", err)
+	} else {
+		log.Println("✅ Server gracefully stopped")
 	}
+	
+	// Clean up WebSocket connections
+	log.Println("🧹 Cleaning up WebSocket connections...")
+	wsServer.Shutdown()
+	
+	log.Println("👋 Goodbye!")
 } 
