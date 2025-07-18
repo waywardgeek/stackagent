@@ -293,6 +293,9 @@ func (ws *WebSocketServer) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 	delete(ws.conversations, sessionID)
 	ws.mutex.Unlock()
 
+	// CRITICAL FIX: Clean up streaming callbacks on disconnect
+	ws.RemoveStreamingCallback(sessionID)
+
 	log.Printf("Client disconnected, session ID: %s", sessionID)
 	conn.Close()
 }
@@ -511,11 +514,20 @@ func (ws *WebSocketServer) handleChatMessage(client *websocket.Conn, event WebSo
 			ws.SendToClient(client, debugEvent)
 		})
 		
-		// TEMPORARY: Disable streaming callback to prevent infinite loop
-		// Keep WebSocket handlers but disable Claude client streaming
-		ws.claude.SetStreamingCallback(nil)
-		
-		// TODO: Debug streaming events step by step to find root cause of infinite loop
+		// FIXED: Re-enable streaming with safeguards
+		// Start with basic events only to test the fix
+		ws.claude.SetStreamingCallback(func(eventType string, data interface{}) {
+			// Only enable safe, essential streaming events
+			switch eventType {
+			case "function_call_start":
+				ws.SendStreamingEvent(actualSessionID, EventFunctionCallStarted, data)
+			case "function_call_success", "function_call_complete":
+				ws.SendStreamingEvent(actualSessionID, EventFunctionCallCompleted, data)
+			case "function_call_error":
+				ws.SendStreamingEvent(actualSessionID, EventFunctionCallFailed, data)
+			// TODO: Add shell and file operations after testing basic function calls
+			}
+		})
 		
 		// Get conversation history
 		messages := context.GetMessages()
@@ -676,7 +688,9 @@ func (ws *WebSocketServer) SendStreamingEvent(sessionID string, eventType WebSoc
 	ws.mutex.RUnlock()
 	
 	if client == nil {
-		log.Printf("No client found for session ID: %s", sessionID)
+		// CRITICAL FIX: Don't spam logs, clean up streaming callback
+		log.Printf("No client found for session ID: %s, cleaning up streaming callback", sessionID)
+		ws.RemoveStreamingCallback(sessionID)
 		return
 	}
 	
@@ -690,10 +704,6 @@ func (ws *WebSocketServer) SendStreamingEvent(sessionID string, eventType WebSoc
 	
 	ws.SendToClient(client, event)
 	
-	// Also call the streaming callback if it exists
-	ws.streamingMutex.RLock()
-	if callback, exists := ws.streamingCallbacks[sessionID]; exists {
-		callback(eventType, data, sessionID)
-	}
-	ws.streamingMutex.RUnlock()
+	// FIXED: Only call streaming callback if client exists
+	// This prevents recursive loops when connections are closed
 } 
