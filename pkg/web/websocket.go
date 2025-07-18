@@ -382,11 +382,14 @@ func (ws *WebSocketServer) handleChatMessage(client *websocket.Conn, event WebSo
 		// Send debug information about what we're sending to Claude
 		debugInfo := map[string]interface{}{
 			"type":        "claude_api_request",
-			"message":     "Sending request to Claude API",
+			"message":     "Sending request to Claude API with prompt caching",
 			"messageCount": len(messages),
 			"messages":    messages,
 			"hasSystemPrompt": true,
 			"systemPrompt":    "You are StackAgent, a helpful AI coding assistant with access to powerful file manipulation and shell command tools. Available functions: run_with_capture (shell commands), read_file (read files), write_file (create/write files), edit_file (find/replace in files), search_in_file (search with context), list_directory (list files with filters). Use these functions to efficiently help with coding tasks, file operations, and system administration. Be concise but helpful. Remember context from previous messages in this conversation.",
+			"cachingEnabled": true,
+			"cachedComponents": []string{"system_prompt", "tool_definitions"},
+			"costReduction": "Up to 90% for cached content",
 		}
 		
 		debugEvent := WebSocketEvent{

@@ -28,9 +28,10 @@ type ClaudeClient struct {
 
 // Tool definition for function calling
 type Tool struct {
-	Name         string      `json:"name"`
-	Description  string      `json:"description"`
-	InputSchema  InputSchema `json:"input_schema"`
+	Name         string        `json:"name"`
+	Description  string        `json:"description"`
+	InputSchema  InputSchema   `json:"input_schema"`
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
 }
 
 type InputSchema struct {
@@ -53,10 +54,22 @@ type ToolUse struct {
 }
 
 type ToolResult struct {
-	Type       string `json:"type"`
-	ToolUseID  string `json:"tool_use_id"`
-	Content    string `json:"content"`
-	IsError    bool   `json:"is_error,omitempty"`
+	Type  string                 `json:"type"`
+	ToolUseID string                 `json:"tool_use_id"`
+	Content string                 `json:"content"`
+	IsError bool                   `json:"is_error,omitempty"`
+}
+
+// Cache control for prompt caching
+type CacheControl struct {
+	Type string `json:"type"`
+}
+
+// Content block with cache control support
+type ContentBlock struct {
+	Type         string        `json:"type"`
+	Text         string        `json:"text,omitempty"`
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
 }
 
 // Claude API request/response structures
@@ -70,7 +83,7 @@ type ClaudeRequest struct {
 	MaxTokens int             `json:"max_tokens"`
 	Messages  []ClaudeMessage `json:"messages"`
 	Tools     []Tool          `json:"tools,omitempty"`
-	System    string          `json:"system,omitempty"`
+	System    interface{}     `json:"system,omitempty"` // Can be string or []ContentBlock
 }
 
 type ClaudeResponse struct {
@@ -580,6 +593,7 @@ func (c *ClaudeClient) getAvailableTools() []Tool {
 				},
 				Required: []string{"directory_path"},
 			},
+			CacheControl: &CacheControl{Type: "ephemeral"}, // Cache all tool definitions
 		},
 	}
 }
@@ -982,12 +996,21 @@ func (c *ClaudeClient) ChatWithTools(message string) (string, error) {
 	}
 
 	for {
+		// Create cached system prompt
+		systemPrompt := []ContentBlock{
+			{
+				Type: "text",
+				Text: "You are StackAgent, a helpful AI coding assistant with access to powerful file manipulation and shell command tools. Available functions: run_with_capture (shell commands), read_file (read files), write_file (create/write files), edit_file (find/replace in files), search_in_file (search with context), list_directory (list files with filters). Use these functions to efficiently help with coding tasks, file operations, and system administration. Be concise but helpful.",
+				CacheControl: &CacheControl{Type: "ephemeral"}, // Cache system prompt
+			},
+		}
+
 		request := ClaudeRequest{
 			Model:     c.model,
 			MaxTokens: 4000,
 			Messages:  messages,
 			Tools:     tools,
-			System:    "You are StackAgent, a helpful AI coding assistant with access to powerful file manipulation and shell command tools. Available functions: run_with_capture (shell commands), read_file (read files), write_file (create/write files), edit_file (find/replace in files), search_in_file (search with context), list_directory (list files with filters). Use these functions to efficiently help with coding tasks, file operations, and system administration. Be concise but helpful.",
+			System:    systemPrompt,
 		}
 
 		response, err := c.makeRequestWithTools(request)
@@ -1072,12 +1095,21 @@ func (c *ClaudeClient) ChatWithToolsAndContext(conversationMessages []Conversati
 	}
 
 	for {
+		// Create cached system prompt
+		systemPrompt := []ContentBlock{
+			{
+				Type: "text",
+				Text: "You are StackAgent, a helpful AI coding assistant with access to powerful file manipulation and shell command tools. Available functions: run_with_capture (shell commands), read_file (read files), write_file (create/write files), edit_file (find/replace in files), search_in_file (search with context), list_directory (list files with filters). Use these functions to efficiently help with coding tasks, file operations, and system administration. Be concise but helpful. Remember context from previous messages in this conversation.",
+				CacheControl: &CacheControl{Type: "ephemeral"}, // Cache system prompt
+			},
+		}
+
 		request := ClaudeRequest{
 			Model:     c.model,
 			MaxTokens: 4000,
 			Messages:  messages,
 			Tools:     tools,
-			System:    "You are StackAgent, a helpful AI coding assistant with access to powerful file manipulation and shell command tools. Available functions: run_with_capture (shell commands), read_file (read files), write_file (create/write files), edit_file (find/replace in files), search_in_file (search with context), list_directory (list files with filters). Use these functions to efficiently help with coding tasks, file operations, and system administration. Be concise but helpful. Remember context from previous messages in this conversation.",
+			System:    systemPrompt,
 		}
 
 		response, err := c.makeRequestWithTools(request)
