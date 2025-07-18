@@ -136,6 +136,44 @@ export const ContextBrowser: React.FC<ContextBrowserProps> = ({ sendMessage }) =
                 {new Date(contextState.createdAt).toLocaleString()}
               </span>
             </div>
+            {contextState.totalCost !== undefined && (
+              <div className="border-t pt-3 mt-3">
+                <div className="flex justify-between text-sm">
+                  <span className="text-secondary-600 dark:text-secondary-400">Total Cost</span>
+                  <span className="text-secondary-900 dark:text-secondary-100 font-mono">
+                    ${contextState.totalCost.toFixed(4)}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-secondary-600 dark:text-secondary-400">API Requests</span>
+                  <span className="text-secondary-900 dark:text-secondary-100">
+                    {contextState.requestCount || 0}
+                  </span>
+                </div>
+                {contextState.cacheStats && (
+                  <>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-secondary-600 dark:text-secondary-400">Cache Hits</span>
+                      <span className="text-secondary-900 dark:text-secondary-100">
+                        {contextState.cacheStats.cacheHits}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-secondary-600 dark:text-secondary-400">Cache Efficiency</span>
+                      <span className="text-secondary-900 dark:text-secondary-100">
+                        {contextState.cacheStats.cacheEfficiency.toFixed(1)}%
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-secondary-600 dark:text-secondary-400">Cache Savings</span>
+                      <span className="text-secondary-900 dark:text-secondary-100 font-mono text-green-600 dark:text-green-400">
+                        ${contextState.cacheStats.totalSavings.toFixed(4)}
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -67,6 +67,14 @@ export interface ContextState {
   createdAt: Date;
   gitBranch?: string;
   gitCommit?: string;
+  totalCost?: number;
+  requestCount?: number;
+  cacheStats?: {
+    cacheHits: number;
+    cacheMisses: number;
+    totalSavings: number;
+    cacheEfficiency: number;
+  };
 }
 
 export interface ProtectedMemory {

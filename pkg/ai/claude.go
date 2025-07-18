@@ -101,8 +101,10 @@ type ClaudeResponse struct {
 	StopReason   string `json:"stop_reason"`
 	StopSequence string `json:"stop_sequence"`
 	Usage        struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
+		InputTokens              int `json:"input_tokens"`
+		OutputTokens             int `json:"output_tokens"`
+		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 	} `json:"usage"`
 }
 
@@ -113,6 +115,69 @@ type ClaudeError struct {
 
 type ClaudeErrorResponse struct {
 	Error ClaudeError `json:"error"`
+}
+
+// Cost calculation structures
+type TokenCost struct {
+	InputTokens              int     `json:"input_tokens"`
+	OutputTokens             int     `json:"output_tokens"`
+	CacheCreationInputTokens int     `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int     `json:"cache_read_input_tokens"`
+	TotalCost                float64 `json:"total_cost"`
+	CostBreakdown            struct {
+		InputCost        float64 `json:"input_cost"`
+		OutputCost       float64 `json:"output_cost"`
+		CacheWriteCost   float64 `json:"cache_write_cost"`
+		CacheReadCost    float64 `json:"cache_read_cost"`
+		CacheSavings     float64 `json:"cache_savings"`
+	} `json:"cost_breakdown"`
+}
+
+// Model pricing (per million tokens)
+func getModelPricing(model string) (inputPrice, outputPrice, cacheWritePrice, cacheReadPrice float64) {
+	switch model {
+	case "claude-3-5-sonnet-20241022":
+		return 3.0, 15.0, 3.75, 0.30  // Sonnet 3.5 pricing
+	case "claude-3-opus-20240229":
+		return 15.0, 75.0, 18.75, 1.50  // Opus 3 pricing
+	case "claude-3-haiku-20240307":
+		return 0.25, 1.25, 0.30, 0.03  // Haiku 3 pricing
+	default:
+		// Default to Sonnet 3.5 pricing
+		return 3.0, 15.0, 3.75, 0.30
+	}
+}
+
+// Calculate cost for a response
+func (c *ClaudeClient) CalculateCost(response *ClaudeResponse) TokenCost {
+	inputPrice, outputPrice, cacheWritePrice, cacheReadPrice := getModelPricing(response.Model)
+	
+	// Convert to per-token pricing (divide by 1,000,000)
+	inputPrice /= 1000000
+	outputPrice /= 1000000
+	cacheWritePrice /= 1000000
+	cacheReadPrice /= 1000000
+	
+	cost := TokenCost{
+		InputTokens:              response.Usage.InputTokens,
+		OutputTokens:             response.Usage.OutputTokens,
+		CacheCreationInputTokens: response.Usage.CacheCreationInputTokens,
+		CacheReadInputTokens:     response.Usage.CacheReadInputTokens,
+	}
+	
+	// Calculate costs
+	cost.CostBreakdown.InputCost = float64(response.Usage.InputTokens) * inputPrice
+	cost.CostBreakdown.OutputCost = float64(response.Usage.OutputTokens) * outputPrice
+	cost.CostBreakdown.CacheWriteCost = float64(response.Usage.CacheCreationInputTokens) * cacheWritePrice
+	cost.CostBreakdown.CacheReadCost = float64(response.Usage.CacheReadInputTokens) * cacheReadPrice
+	
+	// Calculate potential savings (what cache reads would have cost at full price)
+	cost.CostBreakdown.CacheSavings = float64(response.Usage.CacheReadInputTokens) * (inputPrice - cacheReadPrice)
+	
+	cost.TotalCost = cost.CostBreakdown.InputCost + cost.CostBreakdown.OutputCost + 
+		cost.CostBreakdown.CacheWriteCost + cost.CostBreakdown.CacheReadCost
+	
+	return cost
 }
 
 // Debug log entry structure
@@ -985,7 +1050,7 @@ func (c *ClaudeClient) makeRequestWithTools(request ClaudeRequest) (*ClaudeRespo
 }
 
 // ChatWithTools sends a chat message with function calling support
-func (c *ClaudeClient) ChatWithTools(message string) (string, error) {
+func (c *ClaudeClient) ChatWithTools(message string) (string, TokenCost, error) {
 	tools := c.getAvailableTools()
 	
 	messages := []ClaudeMessage{
@@ -994,6 +1059,8 @@ func (c *ClaudeClient) ChatWithTools(message string) (string, error) {
 			Content: message,
 		},
 	}
+
+	totalCost := TokenCost{}
 
 	for {
 		// Create cached system prompt
@@ -1015,8 +1082,16 @@ func (c *ClaudeClient) ChatWithTools(message string) (string, error) {
 
 		response, err := c.makeRequestWithTools(request)
 		if err != nil {
-			return "", err
+			return "", TokenCost{}, err
 		}
+
+		// Calculate cost for the current turn
+		currentTurnCost := c.CalculateCost(response)
+		totalCost.InputTokens += currentTurnCost.InputTokens
+		totalCost.OutputTokens += currentTurnCost.OutputTokens
+		totalCost.CacheCreationInputTokens += currentTurnCost.CacheCreationInputTokens
+		totalCost.CacheReadInputTokens += currentTurnCost.CacheReadInputTokens
+		totalCost.TotalCost += currentTurnCost.TotalCost
 
 		// Check if Claude wants to use a tool
 		var toolUses []ToolUse
@@ -1037,7 +1112,7 @@ func (c *ClaudeClient) ChatWithTools(message string) (string, error) {
 
 		if len(toolUses) == 0 {
 			// No tools to execute, return the text response
-			return textResponse, nil
+			return textResponse, totalCost, nil
 		}
 
 		// Execute tools and prepare tool results
@@ -1077,7 +1152,7 @@ func (c *ClaudeClient) ChatWithTools(message string) (string, error) {
 }
 
 // ChatWithToolsAndContext sends a conversation with context and function calling support
-func (c *ClaudeClient) ChatWithToolsAndContext(conversationMessages []ConversationMessage) (string, error) {
+func (c *ClaudeClient) ChatWithToolsAndContext(conversationMessages []ConversationMessage) (string, TokenCost, error) {
 	tools := c.getAvailableTools()
 	
 	// Convert conversation messages to Claude format
@@ -1091,8 +1166,10 @@ func (c *ClaudeClient) ChatWithToolsAndContext(conversationMessages []Conversati
 
 	// If no messages, return error
 	if len(messages) == 0 {
-		return "", fmt.Errorf("no messages provided")
+		return "", TokenCost{}, fmt.Errorf("no messages provided")
 	}
+
+	totalCost := TokenCost{}
 
 	for {
 		// Create cached system prompt
@@ -1114,8 +1191,16 @@ func (c *ClaudeClient) ChatWithToolsAndContext(conversationMessages []Conversati
 
 		response, err := c.makeRequestWithTools(request)
 		if err != nil {
-			return "", err
+			return "", TokenCost{}, err
 		}
+
+		// Calculate cost for the current turn
+		currentTurnCost := c.CalculateCost(response)
+		totalCost.InputTokens += currentTurnCost.InputTokens
+		totalCost.OutputTokens += currentTurnCost.OutputTokens
+		totalCost.CacheCreationInputTokens += currentTurnCost.CacheCreationInputTokens
+		totalCost.CacheReadInputTokens += currentTurnCost.CacheReadInputTokens
+		totalCost.TotalCost += currentTurnCost.TotalCost
 
 		// Check if Claude wants to use a tool
 		var toolUses []ToolUse
@@ -1136,7 +1221,7 @@ func (c *ClaudeClient) ChatWithToolsAndContext(conversationMessages []Conversati
 
 		if len(toolUses) == 0 {
 			// No tools to execute, return the text response
-			return textResponse, nil
+			return textResponse, totalCost, nil
 		}
 
 		// Execute tools and prepare tool results

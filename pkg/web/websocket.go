@@ -37,11 +37,19 @@ type ConversationMessage = ai.ConversationMessage
 
 // ConversationContext holds the conversation history for a session
 type ConversationContext struct {
-	SessionID string                `json:"sessionId"`
-	Messages  []ConversationMessage `json:"messages"`
-	CreatedAt time.Time             `json:"createdAt"`
-	UpdatedAt time.Time             `json:"updatedAt"`
-	mutex     sync.RWMutex
+	SessionID    string                `json:"sessionId"`
+	Messages     []ConversationMessage `json:"messages"`
+	CreatedAt    time.Time             `json:"createdAt"`
+	UpdatedAt    time.Time             `json:"updatedAt"`
+	TotalCost    float64               `json:"totalCost"`
+	RequestCount int                   `json:"requestCount"`
+	CacheStats   struct {
+		CacheHits        int     `json:"cacheHits"`
+		CacheMisses      int     `json:"cacheMisses"`
+		TotalSavings     float64 `json:"totalSavings"`
+		CacheEfficiency  float64 `json:"cacheEfficiency"`
+	} `json:"cacheStats"`
+	mutex        sync.RWMutex
 }
 
 // AddMessage adds a message to the conversation context
@@ -54,6 +62,30 @@ func (c *ConversationContext) AddMessage(role, content string) {
 		Content:   content,
 		Timestamp: time.Now(),
 	})
+	c.UpdatedAt = time.Now()
+}
+
+// AddCost adds cost information for a request
+func (c *ConversationContext) AddCost(cost ai.TokenCost) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	
+	c.TotalCost += cost.TotalCost
+	c.RequestCount++
+	c.CacheStats.TotalSavings += cost.CostBreakdown.CacheSavings
+	
+	// Track cache hits/misses
+	if cost.CacheReadInputTokens > 0 {
+		c.CacheStats.CacheHits++
+	} else {
+		c.CacheStats.CacheMisses++
+	}
+	
+	// Calculate cache efficiency (% of requests that hit cache)
+	if c.RequestCount > 0 {
+		c.CacheStats.CacheEfficiency = (float64(c.CacheStats.CacheHits) / float64(c.RequestCount)) * 100
+	}
+	
 	c.UpdatedAt = time.Now()
 }
 
@@ -374,6 +406,7 @@ func (ws *WebSocketServer) handleChatMessage(client *websocket.Conn, event WebSo
 	// Send AI response in a goroutine to avoid blocking
 	go func() {
 		var response string
+		var cost ai.TokenCost
 		var err error
 		
 		// Get conversation history
@@ -401,7 +434,7 @@ func (ws *WebSocketServer) handleChatMessage(client *websocket.Conn, event WebSo
 		ws.SendToClient(client, debugEvent)
 		
 		// Convert to Claude format and send with context
-		response, err = ws.claude.ChatWithToolsAndContext(messages)
+		response, cost, err = ws.claude.ChatWithToolsAndContext(messages)
 		
 		if err != nil {
 			log.Printf("Claude API error: %v", err)
@@ -419,20 +452,24 @@ func (ws *WebSocketServer) handleChatMessage(client *websocket.Conn, event WebSo
 
 		// Add AI response to conversation context
 		context.AddMessage("assistant", response)
+		
+		// Add cost information to context
+		context.AddCost(cost)
 
-		// Send AI response
+		// Send AI response with cost information
 		aiResponse := WebSocketEvent{
 			Type: "ai_response",
 			Data: map[string]interface{}{
 				"message":   response,
 				"timestamp": time.Now(),
+				"cost":      cost,
 			},
 			Timestamp: time.Now(),
 			SessionID: actualSessionID,
 		}
 		ws.SendToClient(client, aiResponse)
 
-		// Send updated context information
+		// Send updated context information with cost data
 		contextData := map[string]interface{}{
 			"sessionId":        actualSessionID,
 			"memoryEntries":    len(context.Messages),
@@ -442,6 +479,9 @@ func (ws *WebSocketServer) handleChatMessage(client *websocket.Conn, event WebSo
 			"activeFiles":      0,
 			"lastActivity":     context.UpdatedAt,
 			"createdAt":        context.CreatedAt,
+			"totalCost":        context.TotalCost,
+			"requestCount":     context.RequestCount,
+			"cacheStats":       context.CacheStats,
 		}
 		
 		contextResponse := WebSocketEvent{
