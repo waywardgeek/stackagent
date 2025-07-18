@@ -63,7 +63,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({ sendMessage }) => {
             </div>
           </div>
         ) : (
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 flex flex-col min-h-0">
             <MessageList />
             <FunctionCallList />
           </div>
