@@ -409,6 +409,21 @@ func (ws *WebSocketServer) handleChatMessage(client *websocket.Conn, event WebSo
 		var cost ai.TokenCost
 		var err error
 		
+		// Set up debug callback for function calls
+		ws.claude.SetDebugCallback(func(eventType string, data interface{}) {
+			debugEvent := WebSocketEvent{
+				Type: "debug_message",
+				Data: map[string]interface{}{
+					"type":    eventType,
+					"message": fmt.Sprintf("Function call: %s", eventType),
+					"data":    data,
+				},
+				Timestamp: time.Now(),
+				SessionID: actualSessionID,
+			}
+			ws.SendToClient(client, debugEvent)
+		})
+		
 		// Get conversation history
 		messages := context.GetMessages()
 		

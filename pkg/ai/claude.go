@@ -24,6 +24,7 @@ type ClaudeClient struct {
 	debugFile   *os.File
 	debugEnabled bool
 	shellManager *shell.ShellManager
+	debugCallback func(string, interface{}) // Add callback for debug information
 }
 
 // Tool definition for function calling
@@ -526,6 +527,11 @@ func (c *ClaudeClient) debugLog(direction, content string) {
 		timestamp := time.Now().Format("2006-01-02 15:04:05")
 		c.debugFile.WriteString(fmt.Sprintf("[%s] %s:\n%s\n\n", timestamp, direction, content))
 	}
+}
+
+// SetDebugCallback sets a callback function for debug information
+func (c *ClaudeClient) SetDebugCallback(callback func(string, interface{})) {
+	c.debugCallback = callback
 }
 
 // getAvailableTools returns the list of available tools for function calling
@@ -1118,8 +1124,26 @@ func (c *ClaudeClient) ChatWithTools(message string) (string, TokenCost, error) 
 		// Execute tools and prepare tool results
 		var toolResults []interface{}
 		for _, toolUse := range toolUses {
+			// Log function call start
+			if c.debugCallback != nil {
+				c.debugCallback("function_call_start", map[string]interface{}{
+					"function_name": toolUse.Name,
+					"arguments":     toolUse.Input,
+					"call_id":       toolUse.ID,
+				})
+			}
+			
 			result, err := c.ExecuteFunction(toolUse)
 			if err != nil {
+				// Log function call error
+				if c.debugCallback != nil {
+					c.debugCallback("function_call_error", map[string]interface{}{
+						"function_name": toolUse.Name,
+						"call_id":       toolUse.ID,
+						"error":         err.Error(),
+					})
+				}
+				
 				toolResults = append(toolResults, ToolResult{
 					Type:      "tool_result",
 					ToolUseID: toolUse.ID,
@@ -1127,6 +1151,16 @@ func (c *ClaudeClient) ChatWithTools(message string) (string, TokenCost, error) 
 					IsError:   true,
 				})
 			} else {
+				// Log function call success
+				if c.debugCallback != nil {
+					c.debugCallback("function_call_success", map[string]interface{}{
+						"function_name": toolUse.Name,
+						"call_id":       toolUse.ID,
+						"result":        result,
+						"result_size":   len(result),
+					})
+				}
+				
 				toolResults = append(toolResults, ToolResult{
 					Type:      "tool_result",
 					ToolUseID: toolUse.ID,
@@ -1227,8 +1261,26 @@ func (c *ClaudeClient) ChatWithToolsAndContext(conversationMessages []Conversati
 		// Execute tools and prepare tool results
 		var toolResults []interface{}
 		for _, toolUse := range toolUses {
+			// Log function call start
+			if c.debugCallback != nil {
+				c.debugCallback("function_call_start", map[string]interface{}{
+					"function_name": toolUse.Name,
+					"arguments":     toolUse.Input,
+					"call_id":       toolUse.ID,
+				})
+			}
+			
 			result, err := c.ExecuteFunction(toolUse)
 			if err != nil {
+				// Log function call error
+				if c.debugCallback != nil {
+					c.debugCallback("function_call_error", map[string]interface{}{
+						"function_name": toolUse.Name,
+						"call_id":       toolUse.ID,
+						"error":         err.Error(),
+					})
+				}
+				
 				toolResults = append(toolResults, ToolResult{
 					Type:      "tool_result",
 					ToolUseID: toolUse.ID,
@@ -1236,6 +1288,16 @@ func (c *ClaudeClient) ChatWithToolsAndContext(conversationMessages []Conversati
 					IsError:   true,
 				})
 			} else {
+				// Log function call success
+				if c.debugCallback != nil {
+					c.debugCallback("function_call_success", map[string]interface{}{
+						"function_name": toolUse.Name,
+						"call_id":       toolUse.ID,
+						"result":        result,
+						"result_size":   len(result),
+					})
+				}
+				
 				toolResults = append(toolResults, ToolResult{
 					Type:      "tool_result",
 					ToolUseID: toolUse.ID,
