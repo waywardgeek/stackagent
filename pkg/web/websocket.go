@@ -24,13 +24,31 @@ type WebSocketEvent struct {
 type WebSocketEventType string
 
 const (
+	// Existing events
 	EventChatMessage WebSocketEventType = "chat_message"
 	EventUserMessage WebSocketEventType = "user_message"
 	EventAIResponse  WebSocketEventType = "ai_response"
 	EventAIError     WebSocketEventType = "ai_error"
 	EventPing        WebSocketEventType = "ping"
 	EventPong        WebSocketEventType = "pong"
+	
+	// New Phase 2 streaming events
+	EventFunctionCallStarted    WebSocketEventType = "function_call_started"
+	EventFunctionCallStreaming  WebSocketEventType = "function_call_streaming"
+	EventFunctionCallCompleted  WebSocketEventType = "function_call_completed"
+	EventFunctionCallFailed     WebSocketEventType = "function_call_failed"
+	EventShellCommandStarted    WebSocketEventType = "shell_command_started"
+	EventShellCommandStreaming  WebSocketEventType = "shell_command_streaming"
+	EventShellCommandCompleted  WebSocketEventType = "shell_command_completed"
+	EventFileOperationStarted   WebSocketEventType = "file_operation_started"
+	EventFileOperationStreaming WebSocketEventType = "file_operation_streaming"
+	EventFileOperationCompleted WebSocketEventType = "file_operation_completed"
+	EventAIStreaming            WebSocketEventType = "ai_streaming"
+	EventConfigureStreaming     WebSocketEventType = "configure_streaming"
 )
+
+// StreamingCallback represents a callback for streaming events
+type StreamingCallback func(eventType WebSocketEventType, data interface{}, sessionID string)
 
 // Use ConversationMessage from ai package
 type ConversationMessage = ai.ConversationMessage
@@ -49,6 +67,11 @@ type ConversationContext struct {
 		TotalSavings     float64 `json:"totalSavings"`
 		CacheEfficiency  float64 `json:"cacheEfficiency"`
 	} `json:"cacheStats"`
+	
+	// New Phase 2 fields for streaming
+	ActiveOperations map[string]interface{} `json:"activeOperations"`
+	StreamingEnabled bool                   `json:"streamingEnabled"`
+	
 	mutex        sync.RWMutex
 }
 
@@ -99,6 +122,32 @@ func (c *ConversationContext) GetMessages() []ConversationMessage {
 	return messages
 }
 
+// SetStreamingEnabled enables or disables streaming for this context
+func (c *ConversationContext) SetStreamingEnabled(enabled bool) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.StreamingEnabled = enabled
+}
+
+// AddActiveOperation adds an active operation to track
+func (c *ConversationContext) AddActiveOperation(operationID string, operation interface{}) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	if c.ActiveOperations == nil {
+		c.ActiveOperations = make(map[string]interface{})
+	}
+	c.ActiveOperations[operationID] = operation
+}
+
+// RemoveActiveOperation removes an active operation
+func (c *ConversationContext) RemoveActiveOperation(operationID string) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	if c.ActiveOperations != nil {
+		delete(c.ActiveOperations, operationID)
+	}
+}
+
 // ClearMessages clears all conversation messages
 func (c *ConversationContext) ClearMessages() {
 	c.mutex.Lock()
@@ -115,6 +164,10 @@ type WebSocketServer struct {
 	conversations map[string]*ConversationContext
 	claude        *ai.ClaudeClient
 	mutex         sync.RWMutex
+	
+	// New Phase 2 streaming support
+	streamingCallbacks map[string]StreamingCallback // sessionID -> callback
+	streamingMutex     sync.RWMutex
 }
 
 // NewWebSocketServer creates a new WebSocket server
@@ -137,6 +190,9 @@ func NewWebSocketServer() *WebSocketServer {
 		clients:       make(map[*websocket.Conn]string),
 		conversations: make(map[string]*ConversationContext),
 		claude:        claude,
+		
+		// Initialize Phase 2 streaming support
+		streamingCallbacks: make(map[string]StreamingCallback),
 	}
 }
 
@@ -182,6 +238,10 @@ func (ws *WebSocketServer) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 		Messages:  []ConversationMessage{},
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
+		
+		// Initialize Phase 2 streaming support
+		ActiveOperations: make(map[string]interface{}),
+		StreamingEnabled: true,
 	}
 	ws.mutex.Unlock()
 
@@ -361,6 +421,10 @@ func (ws *WebSocketServer) handleChatMessage(client *websocket.Conn, event WebSo
 			Messages:  []ConversationMessage{},
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Now(),
+			
+			// Initialize Phase 2 streaming support
+			ActiveOperations: make(map[string]interface{}),
+			StreamingEnabled: true,
 		}
 		ws.conversations[actualSessionID] = context
 		ws.mutex.Unlock()
@@ -410,7 +474,13 @@ func (ws *WebSocketServer) handleChatMessage(client *websocket.Conn, event WebSo
 		var operationSummary ai.OperationSummary
 		var err error
 		
-		// Set up debug callback for function calls
+		// Set up streaming callback for real-time operations
+		ws.SetStreamingCallback(actualSessionID, func(eventType WebSocketEventType, data interface{}, sessionID string) {
+			// Handle streaming events from Claude client
+			ws.SendStreamingEvent(sessionID, eventType, data)
+		})
+		
+		// Set up debug callback for function calls (backward compatibility)
 		ws.claude.SetDebugCallback(func(eventType string, data interface{}) {
 			debugEvent := WebSocketEvent{
 				Type: "debug_message",
@@ -423,6 +493,19 @@ func (ws *WebSocketServer) handleChatMessage(client *websocket.Conn, event WebSo
 				SessionID: actualSessionID,
 			}
 			ws.SendToClient(client, debugEvent)
+		})
+		
+		// Set up enhanced streaming callback for the Claude client
+		ws.claude.SetStreamingCallback(func(eventType string, data interface{}) {
+			// Convert debug events to streaming events
+			switch eventType {
+			case "function_call_start":
+				ws.SendStreamingEvent(actualSessionID, EventFunctionCallStarted, data)
+			case "function_call_success", "function_call_complete":
+				ws.SendStreamingEvent(actualSessionID, EventFunctionCallCompleted, data)
+			case "function_call_error":
+				ws.SendStreamingEvent(actualSessionID, EventFunctionCallFailed, data)
+			}
 		})
 		
 		// Get conversation history
@@ -522,4 +605,54 @@ func (ws *WebSocketServer) GetClientCount() int {
 	ws.mutex.RLock()
 	defer ws.mutex.RUnlock()
 	return len(ws.clients)
+}
+
+// SetStreamingCallback sets the streaming callback for a session
+func (ws *WebSocketServer) SetStreamingCallback(sessionID string, callback StreamingCallback) {
+	ws.streamingMutex.Lock()
+	defer ws.streamingMutex.Unlock()
+	ws.streamingCallbacks[sessionID] = callback
+}
+
+// RemoveStreamingCallback removes the streaming callback for a session
+func (ws *WebSocketServer) RemoveStreamingCallback(sessionID string) {
+	ws.streamingMutex.Lock()
+	defer ws.streamingMutex.Unlock()
+	delete(ws.streamingCallbacks, sessionID)
+}
+
+// SendStreamingEvent sends a streaming event to the client
+func (ws *WebSocketServer) SendStreamingEvent(sessionID string, eventType WebSocketEventType, data interface{}) {
+	// Find the client connection for this session
+	var client *websocket.Conn
+	ws.mutex.RLock()
+	for conn, sid := range ws.clients {
+		if sid == sessionID {
+			client = conn
+			break
+		}
+	}
+	ws.mutex.RUnlock()
+	
+	if client == nil {
+		log.Printf("No client found for session ID: %s", sessionID)
+		return
+	}
+	
+	// Send the streaming event
+	event := WebSocketEvent{
+		Type:      string(eventType),
+		Data:      data,
+		Timestamp: time.Now(),
+		SessionID: sessionID,
+	}
+	
+	ws.SendToClient(client, event)
+	
+	// Also call the streaming callback if it exists
+	ws.streamingMutex.RLock()
+	if callback, exists := ws.streamingCallbacks[sessionID]; exists {
+		callback(eventType, data, sessionID)
+	}
+	ws.streamingMutex.RUnlock()
 } 

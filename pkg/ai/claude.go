@@ -25,6 +25,7 @@ type ClaudeClient struct {
 	debugEnabled bool
 	shellManager *shell.ShellManager
 	debugCallback func(string, interface{}) // Add callback for debug information
+	streamingCallback func(string, interface{}) // Add callback for streaming events
 }
 
 // Tool definition for function calling
@@ -534,6 +535,11 @@ func (c *ClaudeClient) SetDebugCallback(callback func(string, interface{})) {
 	c.debugCallback = callback
 }
 
+// SetStreamingCallback sets a callback function for streaming events
+func (c *ClaudeClient) SetStreamingCallback(callback func(string, interface{})) {
+	c.streamingCallback = callback
+}
+
 // getAvailableTools returns the list of available tools for function calling
 func (c *ClaudeClient) getAvailableTools() []Tool {
 	return []Tool{
@@ -671,10 +677,36 @@ func (c *ClaudeClient) getAvailableTools() []Tool {
 
 // ExecuteFunction executes a function call and returns the result
 func (c *ClaudeClient) ExecuteFunction(toolUse ToolUse) (string, error) {
+	// Send streaming event for function start
+	if c.streamingCallback != nil {
+		c.streamingCallback("function_call_start", map[string]interface{}{
+			"id":           toolUse.ID,
+			"name":         toolUse.Name,
+			"arguments":    toolUse.Input,
+			"timestamp":    time.Now(),
+		})
+	}
+	
 	switch toolUse.Name {
 	case "run_with_capture":
+		// Send shell command started event
+		if c.streamingCallback != nil {
+			c.streamingCallback("shell_command_started", map[string]interface{}{
+				"id":          toolUse.ID,
+				"command":     toolUse.Input["command"],
+				"timestamp":   time.Now(),
+			})
+		}
+		
 		command, ok := toolUse.Input["command"].(string)
 		if !ok {
+			if c.streamingCallback != nil {
+				c.streamingCallback("function_call_error", map[string]interface{}{
+					"id":        toolUse.ID,
+					"error":     "invalid command parameter",
+					"timestamp": time.Now(),
+				})
+			}
 			return "", fmt.Errorf("invalid command parameter")
 		}
 
@@ -700,16 +732,52 @@ func (c *ClaudeClient) ExecuteFunction(toolUse ToolUse) (string, error) {
 			result += "\n\nCommand is still running..."
 		}
 
+		// Send shell command completed event
+		if c.streamingCallback != nil {
+			c.streamingCallback("shell_command_completed", map[string]interface{}{
+				"id":         toolUse.ID,
+				"command":    command,
+				"output":     output,
+				"exitCode":   handle.ExitCode,
+				"complete":   handle.Complete,
+				"timestamp":  time.Now(),
+			})
+		}
+
 		return result, nil
 
 	case "read_file":
+		// Send file operation started event
+		if c.streamingCallback != nil {
+			c.streamingCallback("file_operation_started", map[string]interface{}{
+				"id":         toolUse.ID,
+				"type":       "read",
+				"filePath":   toolUse.Input["file_path"],
+				"timestamp":  time.Now(),
+			})
+		}
+		
 		filePath, ok := toolUse.Input["file_path"].(string)
 		if !ok {
+			if c.streamingCallback != nil {
+				c.streamingCallback("function_call_error", map[string]interface{}{
+					"id":        toolUse.ID,
+					"error":     "invalid file_path parameter",
+					"timestamp": time.Now(),
+				})
+			}
 			return "", fmt.Errorf("invalid file_path parameter")
 		}
 
 		content, err := os.ReadFile(filePath)
 		if err != nil {
+			if c.streamingCallback != nil {
+				c.streamingCallback("function_call_error", map[string]interface{}{
+					"id":        toolUse.ID,
+					"error":     fmt.Sprintf("failed to read file: %v", err),
+					"timestamp": time.Now(),
+				})
+			}
 			return "", fmt.Errorf("failed to read file: %w", err)
 		}
 
@@ -721,21 +789,73 @@ func (c *ClaudeClient) ExecuteFunction(toolUse ToolUse) (string, error) {
 				maxLines := int(maxLinesFloat)
 				if maxLines > 0 && maxLines < len(lines) {
 					lines = lines[:maxLines]
-					return fmt.Sprintf("File: %s (showing first %d lines)\n\n%s", filePath, maxLines, strings.Join(lines, "\n")), nil
+					result := fmt.Sprintf("File: %s (showing first %d lines)\n\n%s", filePath, maxLines, strings.Join(lines, "\n"))
+					
+					// Send file operation completed event
+					if c.streamingCallback != nil {
+						c.streamingCallback("file_operation_completed", map[string]interface{}{
+							"id":         toolUse.ID,
+							"type":       "read",
+							"filePath":   filePath,
+							"size":       len(result),
+							"lines":      maxLines,
+							"timestamp":  time.Now(),
+						})
+					}
+					
+					return result, nil
 				}
 			}
 		}
 
-		return fmt.Sprintf("File: %s (%d lines)\n\n%s", filePath, len(lines), string(content)), nil
+		result := fmt.Sprintf("File: %s (%d lines)\n\n%s", filePath, len(lines), string(content))
+		
+		// Send file operation completed event
+		if c.streamingCallback != nil {
+			c.streamingCallback("file_operation_completed", map[string]interface{}{
+				"id":         toolUse.ID,
+				"type":       "read",
+				"filePath":   filePath,
+				"size":       len(string(content)),
+				"lines":      len(lines),
+				"timestamp":  time.Now(),
+			})
+		}
+		
+		return result, nil
 
 	case "write_file":
+		// Send file operation started event
+		if c.streamingCallback != nil {
+			c.streamingCallback("file_operation_started", map[string]interface{}{
+				"id":         toolUse.ID,
+				"type":       "write",
+				"filePath":   toolUse.Input["file_path"],
+				"timestamp":  time.Now(),
+			})
+		}
+		
 		filePath, ok := toolUse.Input["file_path"].(string)
 		if !ok {
+			if c.streamingCallback != nil {
+				c.streamingCallback("function_call_error", map[string]interface{}{
+					"id":        toolUse.ID,
+					"error":     "invalid file_path parameter",
+					"timestamp": time.Now(),
+				})
+			}
 			return "", fmt.Errorf("invalid file_path parameter")
 		}
 
 		content, ok := toolUse.Input["content"].(string)
 		if !ok {
+			if c.streamingCallback != nil {
+				c.streamingCallback("function_call_error", map[string]interface{}{
+					"id":        toolUse.ID,
+					"error":     "invalid content parameter",
+					"timestamp": time.Now(),
+				})
+			}
 			return "", fmt.Errorf("invalid content parameter")
 		}
 
@@ -751,23 +871,70 @@ func (c *ClaudeClient) ExecuteFunction(toolUse ToolUse) (string, error) {
 		if append {
 			file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 			if err != nil {
+				if c.streamingCallback != nil {
+					c.streamingCallback("function_call_error", map[string]interface{}{
+						"id":        toolUse.ID,
+						"error":     fmt.Sprintf("failed to open file for append: %v", err),
+						"timestamp": time.Now(),
+					})
+				}
 				return "", fmt.Errorf("failed to open file for append: %w", err)
 			}
 			defer file.Close()
 			
 			_, err = file.WriteString(content)
 			if err != nil {
+				if c.streamingCallback != nil {
+					c.streamingCallback("function_call_error", map[string]interface{}{
+						"id":        toolUse.ID,
+						"error":     fmt.Sprintf("failed to append to file: %v", err),
+						"timestamp": time.Now(),
+					})
+				}
 				return "", fmt.Errorf("failed to append to file: %w", err)
 			}
 			
-			return fmt.Sprintf("Successfully appended %d characters to %s", len(content), filePath), nil
+			result := fmt.Sprintf("Successfully appended %d characters to %s", len(content), filePath)
+			
+			// Send file operation completed event
+			if c.streamingCallback != nil {
+				c.streamingCallback("file_operation_completed", map[string]interface{}{
+					"id":         toolUse.ID,
+					"type":       "append",
+					"filePath":   filePath,
+					"size":       len(content),
+					"timestamp":  time.Now(),
+				})
+			}
+			
+			return result, nil
 		} else {
 			err = os.WriteFile(filePath, []byte(content), 0644)
 			if err != nil {
+				if c.streamingCallback != nil {
+					c.streamingCallback("function_call_error", map[string]interface{}{
+						"id":        toolUse.ID,
+						"error":     fmt.Sprintf("failed to write file: %v", err),
+						"timestamp": time.Now(),
+					})
+				}
 				return "", fmt.Errorf("failed to write file: %w", err)
 			}
 			
-			return fmt.Sprintf("Successfully wrote %d characters to %s", len(content), filePath), nil
+			result := fmt.Sprintf("Successfully wrote %d characters to %s", len(content), filePath)
+			
+			// Send file operation completed event
+			if c.streamingCallback != nil {
+				c.streamingCallback("file_operation_completed", map[string]interface{}{
+					"id":         toolUse.ID,
+					"type":       "write",
+					"filePath":   filePath,
+					"size":       len(content),
+					"timestamp":  time.Now(),
+				})
+			}
+			
+			return result, nil
 		}
 
 	case "edit_file":
@@ -892,8 +1059,25 @@ func (c *ClaudeClient) ExecuteFunction(toolUse ToolUse) (string, error) {
 		return fmt.Sprintf("Found %d match(es) for pattern '%s' in %s:\n\n%s", len(matches), pattern, filePath, strings.Join(matches, "\n\n")), nil
 
 	case "list_directory":
+		// Send file operation started event
+		if c.streamingCallback != nil {
+			c.streamingCallback("file_operation_started", map[string]interface{}{
+				"id":         toolUse.ID,
+				"type":       "list",
+				"dirPath":    toolUse.Input["directory_path"],
+				"timestamp":  time.Now(),
+			})
+		}
+		
 		dirPath, ok := toolUse.Input["directory_path"].(string)
 		if !ok {
+			if c.streamingCallback != nil {
+				c.streamingCallback("function_call_error", map[string]interface{}{
+					"id":        toolUse.ID,
+					"error":     "invalid directory_path parameter",
+					"timestamp": time.Now(),
+				})
+			}
 			return "", fmt.Errorf("invalid directory_path parameter")
 		}
 
@@ -956,6 +1140,13 @@ func (c *ClaudeClient) ExecuteFunction(toolUse ToolUse) (string, error) {
 		} else {
 			entries, err := os.ReadDir(dirPath)
 			if err != nil {
+				if c.streamingCallback != nil {
+					c.streamingCallback("function_call_error", map[string]interface{}{
+						"id":        toolUse.ID,
+						"error":     fmt.Sprintf("failed to read directory: %v", err),
+						"timestamp": time.Now(),
+					})
+				}
 				return "", fmt.Errorf("failed to read directory: %w", err)
 			}
 
@@ -979,16 +1170,57 @@ func (c *ClaudeClient) ExecuteFunction(toolUse ToolUse) (string, error) {
 		}
 
 		if err != nil {
+			if c.streamingCallback != nil {
+				c.streamingCallback("function_call_error", map[string]interface{}{
+					"id":        toolUse.ID,
+					"error":     fmt.Sprintf("failed to list directory: %v", err),
+					"timestamp": time.Now(),
+				})
+			}
 			return "", fmt.Errorf("failed to list directory: %w", err)
 		}
 
 		if len(files) == 0 {
-			return fmt.Sprintf("No files found in %s with the specified criteria", dirPath), nil
+			result := fmt.Sprintf("No files found in %s with the specified criteria", dirPath)
+			
+			// Send file operation completed event
+			if c.streamingCallback != nil {
+				c.streamingCallback("file_operation_completed", map[string]interface{}{
+					"id":         toolUse.ID,
+					"type":       "list",
+					"dirPath":    dirPath,
+					"fileCount":  0,
+					"timestamp":  time.Now(),
+				})
+			}
+			
+			return result, nil
 		}
 
-		return fmt.Sprintf("Found %d item(s) in %s:\n\n%s", len(files), dirPath, strings.Join(files, "\n")), nil
+		result := fmt.Sprintf("Found %d item(s) in %s:\n\n%s", len(files), dirPath, strings.Join(files, "\n"))
+		
+		// Send file operation completed event
+		if c.streamingCallback != nil {
+			c.streamingCallback("file_operation_completed", map[string]interface{}{
+				"id":         toolUse.ID,
+				"type":       "list",
+				"dirPath":    dirPath,
+				"fileCount":  len(files),
+				"timestamp":  time.Now(),
+			})
+		}
+		
+		return result, nil
 
 	default:
+		// Send function call error for unknown function
+		if c.streamingCallback != nil {
+			c.streamingCallback("function_call_error", map[string]interface{}{
+				"id":        toolUse.ID,
+				"error":     fmt.Sprintf("unknown function: %s", toolUse.Name),
+				"timestamp": time.Now(),
+			})
+		}
 		return "", fmt.Errorf("unknown function: %s", toolUse.Name)
 	}
 }
@@ -1067,8 +1299,13 @@ func (c *ClaudeClient) ChatWithTools(message string) (string, TokenCost, error) 
 	}
 
 	totalCost := TokenCost{}
+	
+	// Safety: Limit the number of tool execution rounds to prevent infinite loops
+	maxRounds := 10
+	round := 0
 
-	for {
+	for round < maxRounds {
+		round++
 		// Create cached system prompt
 		systemPrompt := []ContentBlock{
 			{
@@ -1183,6 +1420,15 @@ func (c *ClaudeClient) ChatWithTools(message string) (string, TokenCost, error) 
 
 		// Continue the conversation to get Claude's final response
 	}
+	
+	// If we exit the loop due to maxRounds limit, return with warning
+	if round >= maxRounds {
+		warningMsg := fmt.Sprintf("⚠️ Maximum tool execution rounds (%d) reached. This may indicate an infinite loop. The AI stopped to prevent resource exhaustion.", maxRounds)
+		return warningMsg, totalCost, nil
+	}
+	
+	// This should not be reached in normal operation
+	return "Unexpected end of tool execution loop", totalCost, nil
 }
 
 // ChatWithToolsAndContext sends a conversation with context and function calling support
@@ -1226,8 +1472,13 @@ func (c *ClaudeClient) ChatWithToolsAndContext(conversationMessages []Conversati
 	}
 
 	totalCost := TokenCost{}
+	
+	// Safety: Limit the number of tool execution rounds to prevent infinite loops
+	maxRounds := 10
+	round := 0
 
-	for {
+	for round < maxRounds {
+		round++
 		// Create cached system prompt
 		systemPrompt := []ContentBlock{
 			{
@@ -1455,6 +1706,15 @@ func (c *ClaudeClient) ChatWithToolsAndContext(conversationMessages []Conversati
 
 		// Continue the conversation to get Claude's final response
 	}
+	
+	// If we exit the loop due to maxRounds limit, return with warning
+	if round >= maxRounds {
+		warningMsg := fmt.Sprintf("⚠️ Maximum tool execution rounds (%d) reached. This may indicate an infinite loop. The AI stopped to prevent resource exhaustion.", maxRounds)
+		return warningMsg, totalCost, operationSummary, nil
+	}
+	
+	// This should not be reached in normal operation
+	return "Unexpected end of tool execution loop", totalCost, operationSummary, nil
 }
 
 // ConversationMessage represents a message in a conversation - matches web package structure
